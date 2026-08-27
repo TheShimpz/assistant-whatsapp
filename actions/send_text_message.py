@@ -38,7 +38,7 @@ async def run(
             description="Enter the Meta access token used by this WhatsApp Action.",
             label="Meta access token",
             min_length=1,
-            max_length=2048,
+            max_length=1024,
             stored_input="whatsapp-token",
         )
     )

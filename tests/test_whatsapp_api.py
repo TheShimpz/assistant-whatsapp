@@ -6,7 +6,8 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from shimpz import InputRequest
+from shimpz import Context, InputRequest
+from shimpz._human import HumanRequestSuspension
 
 from actions.send_text_message import run as send_text_message
 from lib.whatsapp import (
@@ -83,8 +84,42 @@ class _ActionContext:
         self.events.append("approval")
 
     def request_input(self, request: InputRequest) -> str:
-        assert request.kind == "password"
-        assert request.stored_input == "whatsapp-token"
+        sdk_context = Context(
+            {},
+            human_requests=["input:password"],
+            stored_input_ids=["whatsapp-token"],
+        )
+        with pytest.raises(HumanRequestSuspension) as suspended:
+            sdk_context.request_input(request)
+        frame = suspended.value.request
+        assert set(frame) == {
+            "kind",
+            "ordinal",
+            "title",
+            "description",
+            "label",
+            "required",
+            "placeholder",
+            "min_length",
+            "max_length",
+            "stored_input",
+            "fingerprint",
+        }
+        assert frame == {
+            "kind": "input:password",
+            "ordinal": 0,
+            "title": "WhatsApp access token",
+            "description": "Enter the Meta access token used by this WhatsApp Action.",
+            "label": "Meta access token",
+            "required": True,
+            "placeholder": None,
+            "min_length": 1,
+            "max_length": 1024,
+            "stored_input": "whatsapp-token",
+            "fingerprint": frame["fingerprint"],
+        }
+        assert isinstance(frame["fingerprint"], str)
+        assert len(frame["fingerprint"]) == 64
         assert TOKEN not in request.title
         assert TOKEN not in request.description
         self.events.append("stored-input")
