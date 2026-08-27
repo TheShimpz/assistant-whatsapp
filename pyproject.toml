@@ -1,0 +1,32 @@
+[project]
+name = "assistant-whatsapp"
+version = "0.1.0"
+description = "Reviewed WhatsApp Cloud API messaging for Shimpz"
+requires-python = ">=3.14"
+dependencies = [
+  "aiohttp==3.14.1",
+  "shimpz @ git+https://github.com/TheShimpz/shimpz-sdk.git@26072ba360708d3ddb5ef7fda69c9009d99ae9f3#subdirectory=python",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==9.1.1",
+  "ruff==0.15.22",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+  "F", "E4", "E7", "E9", "W", "I", "UP", "B", "S", "ASYNC",
+  "C4", "SIM", "PTH", "PIE", "PERF", "FURB", "RUF", "BLE",
+]
+ignore = ["S311", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S108", "S310"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

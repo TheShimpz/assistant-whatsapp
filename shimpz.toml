@@ -1,0 +1,25 @@
+[shimpz]
+spec = 1
+id = "whatsapp"
+version = "0.1.0"
+name = "WhatsApp"
+summary = "Send reviewed text messages through the WhatsApp Cloud API with a reusable token."
+creators = ["@shimpz"]
+github = "https://github.com/TheShimpz/assistant-whatsapp"
+genesis = """
+Use this Assistant to send reviewed text messages through the WhatsApp Cloud API.
+
+Call send-text-message only when the user provides the exact Meta sender phone-number id, recipient number with
+country code, and message body. The Action asks for approval before every send. Its Meta access token is requested
+just in time on first use, stored by the Team, and reused without another token prompt. Never ask for the token in
+chat, expose it, claim delivery beyond the returned Meta message id, retry an uncertain send, or invent a sender,
+recipient, or message. A provider-confirmed invalid token is discarded so the next attempt can request a new one.
+"""
+
+[network]
+allowed_hosts = ["graph.facebook.com"]
+
+[stored_inputs.whatsapp-token]
+kind = "password"
+label = "WhatsApp access token"
+description = "Meta access token used by the WhatsApp Cloud API."
