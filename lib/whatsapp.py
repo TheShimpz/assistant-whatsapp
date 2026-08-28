@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from ipaddress import ip_address
+from math import isfinite
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
 from urllib.parse import quote, urlsplit
 
@@ -40,6 +41,9 @@ MediaLink = Annotated[
 ]
 MediaCaption = Annotated[str, "Media caption.", {"minLength": 1, "maxLength": 1024}]
 MediaFilename = Annotated[str, "Document filename.", {"minLength": 1, "maxLength": 240}]
+Latitude = Annotated[float, "Location latitude.", {"minimum": -90.0, "maximum": 90.0}]
+Longitude = Annotated[float, "Location longitude.", {"minimum": -180.0, "maximum": 180.0}]
+LocationText = Annotated[str, "Location name or address.", {"minLength": 1, "maxLength": 1000}]
 
 
 class TextMessage(TypedDict):
@@ -57,7 +61,15 @@ class MediaMessage(TypedDict):
     reply_to_message_id: NotRequired[MessageId]
 
 
-class SendTextMessageResult(TypedDict):
+class LocationMessage(TypedDict):
+    latitude: Latitude
+    longitude: Longitude
+    name: NotRequired[LocationText]
+    address: NotRequired[LocationText]
+    reply_to_message_id: NotRequired[MessageId]
+
+
+class SendMessageResult(TypedDict):
     recipient: Recipient
     whatsapp_id: Annotated[str, {"pattern": r"^[1-9][0-9]{7,19}$"}]
     message_id: Annotated[str, {"minLength": 1, "maxLength": 512}]
@@ -81,7 +93,7 @@ class WhatsAppApiClient:
         sender_phone_number_id: str,
         recipient: str,
         message: TextMessage,
-    ) -> SendTextMessageResult:
+    ) -> SendMessageResult:
         sender = _phone_number_id(sender_phone_number_id)
         destination = _recipient(recipient)
         text = _text_message(message)
@@ -98,11 +110,22 @@ class WhatsAppApiClient:
         sender_phone_number_id: str,
         recipient: str,
         message: MediaMessage,
-    ) -> SendTextMessageResult:
+    ) -> SendMessageResult:
         sender = _phone_number_id(sender_phone_number_id)
         destination = _recipient(recipient)
         media_type, media, reply_to = _media_message(message)
         return await self._send_message(sender, destination, media_type, media, reply_to)
+
+    async def send_location_message(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        message: LocationMessage,
+    ) -> SendMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        location, reply_to = _location_message(message)
+        return await self._send_message(sender, destination, "location", location, reply_to)
 
     async def _send_message(
         self,
@@ -111,7 +134,7 @@ class WhatsAppApiClient:
         message_type: str,
         content: dict[str, object],
         reply_to_message_id: str | None,
-    ) -> SendTextMessageResult:
+    ) -> SendMessageResult:
         body: dict[str, object] = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -200,7 +223,7 @@ def _json_object(raw: bytes) -> dict[str, Any]:
     return payload
 
 
-def _send_result(payload: dict[str, Any], recipient: str) -> SendTextMessageResult:
+def _send_result(payload: dict[str, Any], recipient: str) -> SendMessageResult:
     contacts = payload.get("contacts")
     messages = payload.get("messages")
     if (
@@ -303,6 +326,39 @@ def media_message_summary(value: object) -> str:
     source = "Meta media id" if "id" in media else "public HTTPS link"
     reply = " as a reply" if reply_to is not None else ""
     return f"{media_type} from {source}{reply}"
+
+
+def _location_message(value: object) -> tuple[dict[str, object], str | None]:
+    message = _closed_object(
+        value,
+        required={"latitude", "longitude"},
+        optional={"name", "address", "reply_to_message_id"},
+    )
+    location: dict[str, object] = {
+        "latitude": _coordinate(message["latitude"], minimum=-90.0, maximum=90.0),
+        "longitude": _coordinate(message["longitude"], minimum=-180.0, maximum=180.0),
+    }
+    for field in ("name", "address"):
+        if field in message:
+            location[field] = _bounded_message_text(message[field], 1000)
+    reply_to = _message_id(message["reply_to_message_id"]) if "reply_to_message_id" in message else None
+    return location, reply_to
+
+
+def location_message_summary(value: object) -> str:
+    """Validate one location request and return a bounded approval summary."""
+    location, reply_to = _location_message(value)
+    reply = " as a reply" if reply_to is not None else ""
+    return f"location at {location['latitude']}, {location['longitude']}{reply}"
+
+
+def _coordinate(value: object, *, minimum: float, maximum: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise WhatsAppApiError("WhatsApp location coordinate is invalid")
+    coordinate = float(value)
+    if not isfinite(coordinate) or not minimum <= coordinate <= maximum:
+        raise WhatsAppApiError("WhatsApp location coordinate is invalid")
+    return coordinate
 
 
 def _message_id(value: object) -> str:

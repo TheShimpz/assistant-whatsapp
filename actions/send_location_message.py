@@ -1,13 +1,14 @@
-"""Send one reviewed WhatsApp text message."""
+"""Send one reviewed WhatsApp location message."""
 
 from shimpz import Context, action
 
 from lib.runtime import approved_whatsapp_client
 from lib.whatsapp import (
+    LocationMessage,
     PhoneNumberId,
     Recipient,
     SendMessageResult,
-    TextMessage,
+    location_message_summary,
 )
 
 
@@ -18,16 +19,16 @@ from lib.whatsapp import (
 async def run(
     sender_phone_number_id: PhoneNumberId,
     recipient: Recipient,
-    message: TextMessage,
+    location: LocationMessage,
     *,
     ctx: Context,
 ) -> SendMessageResult:
+    summary = location_message_summary(location)
     async with approved_whatsapp_client(
         ctx,
-        title="Send this WhatsApp message",
+        title="Send this WhatsApp location",
         description=(
-            f"Send one reviewed text message from Meta phone-number id {sender_phone_number_id} "
-            f"to {recipient}."
+            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
         ),
     ) as client:
-        return await client.send_text_message(sender_phone_number_id, recipient, message)
+        return await client.send_location_message(sender_phone_number_id, recipient, location)

@@ -10,6 +10,7 @@ import pytest
 from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
 
+from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_text_message import run as send_text_message
 from lib.whatsapp import (
@@ -343,6 +344,69 @@ def test_media_action_orders_approval_before_stored_input_and_provider() -> None
                 SENDER_ID,
                 RECIPIENT,
                 {"media_type": "sticker", "media_id": "123456789"},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def test_sends_location_with_optional_fields_and_reply() -> None:
+    session = _Session([_Response(_success())])
+    asyncio.run(
+        WhatsAppApiClient(session, TOKEN).send_location_message(
+            SENDER_ID,
+            RECIPIENT,
+            {
+                "latitude": -23.55052,
+                "longitude": -46.633308,
+                "name": "Praça da Sé",
+                "address": "Sé, São Paulo - SP",
+                "reply_to_message_id": "wamid.previous",
+            },
+        )
+    )
+    assert json.loads(session.requests[0][1]["data"]) == {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": RECIPIENT,
+        "type": "location",
+        "location": {
+            "latitude": -23.55052,
+            "longitude": -46.633308,
+            "name": "Praça da Sé",
+            "address": "Sé, São Paulo - SP",
+        },
+        "context": {"message_id": "wamid.previous"},
+    }
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        {"latitude": 91.0, "longitude": 0.0},
+        {"latitude": 0.0, "longitude": -181.0},
+        {"latitude": True, "longitude": 0.0},
+        {"latitude": float("nan"), "longitude": 0.0},
+        {"latitude": 0.0, "longitude": 0.0, "unknown": "field"},
+    ],
+)
+def test_rejects_invalid_locations_before_provider(location: dict[str, object]) -> None:
+    session = _Session([])
+    with pytest.raises(WhatsAppApiError):
+        asyncio.run(WhatsAppApiClient(session, TOKEN).send_location_message(SENDER_ID, RECIPIENT, location))
+    assert session.requests == []
+
+
+def test_location_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_location_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"latitude": -23.55052, "longitude": -46.633308},
                 ctx=_ActionContext(events),
             )
         )

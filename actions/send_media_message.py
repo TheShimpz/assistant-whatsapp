@@ -7,7 +7,7 @@ from lib.whatsapp import (
     MediaMessage,
     PhoneNumberId,
     Recipient,
-    SendTextMessageResult,
+    SendMessageResult,
     media_message_summary,
 )
 
@@ -22,7 +22,7 @@ async def run(
     message: MediaMessage,
     *,
     ctx: Context,
-) -> SendTextMessageResult:
+) -> SendMessageResult:
     summary = media_message_summary(message)
     async with approved_whatsapp_client(
         ctx,
