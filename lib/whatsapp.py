@@ -16,7 +16,7 @@ import aiohttp
 GRAPH_API_ORIGIN = "https://graph.facebook.com"
 GRAPH_API_VERSION = "v23.0"
 MAX_RESPONSE_BYTES = 64 * 1024
-MAX_REQUEST_BYTES = 8 * 1024
+MAX_REQUEST_BYTES = 64 * 1024
 HTTP_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3, sock_connect=3, sock_read=5)
 _PHONE_NUMBER_ID_PATTERN = r"^[1-9][0-9]{4,31}$"
 _RECIPIENT_PATTERN = r"^\+?[1-9][0-9]{7,14}$"
@@ -253,6 +253,16 @@ class WhatsAppApiClient:
         if payload != {"success": True}:
             raise WhatsAppApiError("WhatsApp read receipt result is invalid")
         return {"message_id": message_id, "read": True, "typing_indicator": typing_indicator}
+
+    async def send_template_message(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        template: dict[str, object],
+    ) -> SendMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        return await self._send_message(sender, destination, "template", template, None)
 
     async def _send_message(
         self,

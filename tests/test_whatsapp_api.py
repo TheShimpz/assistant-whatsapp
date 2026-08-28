@@ -14,6 +14,7 @@ from actions.mark_message_read import run as mark_message_read
 from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
+from actions.send_template_message import run as send_template_message
 from actions.send_text_message import run as send_text_message
 from actions.set_message_reaction import run as set_message_reaction
 from lib.whatsapp import (
@@ -608,4 +609,24 @@ def test_read_receipt_action_orders_approval_before_stored_input_and_provider() 
             )
         )
     assert result["read"] is True
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def test_template_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_template_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"name": "hello_world", "language_code": "en_US"},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert json.loads(session.requests[0][1]["data"])["template"] == {
+        "name": "hello_world",
+        "language": {"code": "en_US"},
+    }
     assert events == ["approval", "stored-input", "provider"]
