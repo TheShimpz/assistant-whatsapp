@@ -436,6 +436,14 @@ def _text_message(value: object) -> TextMessage:
     return result
 
 
+def text_message_summary(value: object) -> str:
+    """Validate one text request and return a bounded approval summary."""
+    message = _text_message(value)
+    preview = " with link preview" if message.get("preview_url", False) else ""
+    reply = " as a reply" if "reply_to_message_id" in message else ""
+    return f"text message{preview}{reply}"
+
+
 def _media_message(value: object) -> tuple[str, dict[str, object], str | None]:
     message = _closed_object(
         value,

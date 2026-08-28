@@ -8,6 +8,7 @@ from lib.whatsapp import (
     Recipient,
     SendMessageResult,
     TextMessage,
+    text_message_summary,
 )
 
 
@@ -22,11 +23,12 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
+    summary = text_message_summary(message)
     async with approved_whatsapp_client(
         ctx,
         title="Send this WhatsApp message",
         description=(
-            f"Send one reviewed text message from Meta phone-number id {sender_phone_number_id} "
+            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} "
             f"to {recipient}."
         ),
     ) as client:

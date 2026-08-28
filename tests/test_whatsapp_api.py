@@ -218,6 +218,22 @@ def test_action_orders_approval_before_stored_input_and_provider() -> None:
     assert events == ["approval", "stored-input", "provider"]
 
 
+def test_text_action_rejects_invalid_content_before_approval_and_stored_input() -> None:
+    events: list[str] = []
+
+    with pytest.raises(WhatsAppApiError, match="message is invalid"):
+        asyncio.run(
+            send_text_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"body": " invalid whitespace "},
+                ctx=_ActionContext(events),
+            )
+        )
+
+    assert events == []
+
+
 def test_action_clears_only_an_explicitly_rejected_token() -> None:
     rejected_events: list[str] = []
     rejected = _Session([_Response({"error": {"code": 190}}, status=400)], rejected_events)
