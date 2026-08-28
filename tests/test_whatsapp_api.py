@@ -25,6 +25,7 @@ from lib.whatsapp import (
     WhatsAppApiClient,
     WhatsAppApiError,
     WhatsAppTokenRejected,
+    create_http_session,
 )
 
 SENDER_ID = "123456789012345"
@@ -147,6 +148,14 @@ def _success() -> dict[str, object]:
         "contacts": [{"input": RECIPIENT, "wa_id": RECIPIENT}],
         "messages": [{"id": "wamid.message-id"}],
     }
+
+
+def test_http_session_ignores_ambient_proxy_and_netrc_configuration() -> None:
+    async def inspect_session() -> None:
+        async with create_http_session() as session:
+            assert session.trust_env is False
+
+    asyncio.run(inspect_session())
 
 
 def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
