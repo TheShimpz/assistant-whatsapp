@@ -7,6 +7,7 @@ from pathlib import Path
 
 from shimpz.action import ActionMetadata, get_action_metadata
 
+from actions.mark_message_read import run as mark_message_read
 from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
@@ -37,6 +38,7 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
 
 def test_action_declares_exact_human_and_stored_input_contract() -> None:
     for body in (
+        mark_message_read,
         send_contacts_message,
         send_location_message,
         send_media_message,

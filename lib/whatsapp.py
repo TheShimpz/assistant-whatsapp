@@ -143,10 +143,21 @@ class ReactionMessage(TypedDict):
     emoji: Annotated[str, "One emoji, or an empty string to remove a reaction.", {"maxLength": 16}]
 
 
+class ReadReceipt(TypedDict):
+    message_id: MessageId
+    typing_indicator: NotRequired[bool]
+
+
 class SendMessageResult(TypedDict):
     recipient: Recipient
     whatsapp_id: Annotated[str, {"pattern": r"^[1-9][0-9]{7,19}$"}]
     message_id: Annotated[str, {"minLength": 1, "maxLength": 512}]
+
+
+class ReadReceiptResult(TypedDict):
+    message_id: MessageId
+    read: bool
+    typing_indicator: bool
 
 
 class WhatsAppApiError(RuntimeError):
@@ -223,6 +234,26 @@ class WhatsAppApiClient:
         content = _reaction_message(reaction)
         return await self._send_message(sender, destination, "reaction", content, None)
 
+    async def mark_message_read(
+        self,
+        sender_phone_number_id: str,
+        receipt: ReadReceipt,
+    ) -> ReadReceiptResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        message_id, typing_indicator = _read_receipt(receipt)
+        body: dict[str, object] = {
+            "messaging_product": "whatsapp",
+            "status": "read",
+            "message_id": message_id,
+        }
+        if typing_indicator:
+            body["typing_indicator"] = {"type": "text"}
+        method = "POST" if typing_indicator else "PUT"
+        payload = await self._request(sender, method, _encoded_body(body))
+        if payload != {"success": True}:
+            raise WhatsAppApiError("WhatsApp read receipt result is invalid")
+        return {"message_id": message_id, "read": True, "typing_indicator": typing_indicator}
+
     async def _send_message(
         self,
         sender: str,
@@ -240,13 +271,10 @@ class WhatsAppApiClient:
         }
         if reply_to_message_id is not None:
             body["context"] = {"message_id": reply_to_message_id}
-        encoded = json.dumps(body, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode()
-        if not 1 <= len(encoded) <= MAX_REQUEST_BYTES:
-            raise WhatsAppApiError("WhatsApp request size is invalid")
-        payload = await self._post(sender, encoded)
+        payload = await self._request(sender, "POST", _encoded_body(body))
         return _send_result(payload, destination)
 
-    async def _post(self, sender: str, body: bytes) -> dict[str, Any]:
+    async def _request(self, sender: str, method: str, body: bytes) -> dict[str, Any]:
         path = f"/{GRAPH_API_VERSION}/{quote(sender, safe='')}/messages"
         headers = {
             "Accept": "application/json",
@@ -256,7 +284,7 @@ class WhatsAppApiClient:
         }
         try:
             async with self._session.request(
-                "POST",
+                method,
                 f"{GRAPH_API_ORIGIN}{path}",
                 headers=headers,
                 data=body,
@@ -267,7 +295,7 @@ class WhatsAppApiClient:
                 if _error_code(payload) == 190:
                     raise WhatsAppTokenRejected("WhatsApp rejected the access token")
                 if response.status != 200:
-                    raise WhatsAppApiError("WhatsApp rejected the message")
+                    raise WhatsAppApiError("WhatsApp rejected the request")
                 return payload
         except WhatsAppApiError:
             raise
@@ -603,6 +631,13 @@ def _bounded_list(value: object, *, minimum: int, maximum: int) -> list[object]:
     return value
 
 
+def _encoded_body(body: dict[str, object]) -> bytes:
+    encoded = json.dumps(body, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode()
+    if not 1 <= len(encoded) <= MAX_REQUEST_BYTES:
+        raise WhatsAppApiError("WhatsApp request size is invalid")
+    return encoded
+
+
 def _reaction_message(value: object) -> dict[str, object]:
     reaction = _closed_object(value, required={"message_id", "emoji"}, optional=set())
     emoji = reaction["emoji"]
@@ -616,6 +651,21 @@ def reaction_message_summary(value: object) -> str:
     reaction = _reaction_message(value)
     emoji = reaction["emoji"]
     return f"reaction {emoji}" if emoji else "reaction removal"
+
+
+def _read_receipt(value: object) -> tuple[str, bool]:
+    receipt = _closed_object(value, required={"message_id"}, optional={"typing_indicator"})
+    typing_indicator = receipt.get("typing_indicator", False)
+    if type(typing_indicator) is not bool:
+        raise WhatsAppApiError("WhatsApp typing indicator is invalid")
+    return _message_id(receipt["message_id"]), typing_indicator
+
+
+def read_receipt_summary(value: object) -> str:
+    """Validate one read receipt and return a bounded approval summary."""
+    message_id, typing_indicator = _read_receipt(value)
+    typing = " and show a typing indicator" if typing_indicator else ""
+    return f"mark message {message_id} as read{typing}"
 
 
 def _valid_reaction_emoji(value: str) -> bool:

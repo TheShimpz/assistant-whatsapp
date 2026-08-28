@@ -10,6 +10,7 @@ import pytest
 from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
 
+from actions.mark_message_read import run as mark_message_read
 from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
@@ -539,4 +540,72 @@ def test_reaction_action_orders_approval_before_stored_input_and_provider() -> N
             )
         )
     assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]
+
+
+@pytest.mark.parametrize(
+    ("typing_indicator", "method"),
+    [(False, "PUT"), (True, "POST")],
+)
+def test_marks_incoming_message_read_with_optional_typing_indicator(
+    typing_indicator: bool,
+    method: str,
+) -> None:
+    session = _Session([_Response({"success": True})])
+    result = asyncio.run(
+        WhatsAppApiClient(session, TOKEN).mark_message_read(
+            SENDER_ID,
+            {"message_id": "wamid.incoming", "typing_indicator": typing_indicator},
+        )
+    )
+    assert result == {
+        "message_id": "wamid.incoming",
+        "read": True,
+        "typing_indicator": typing_indicator,
+    }
+    request = session.requests[0][1]
+    assert request["method"] == method
+    expected: dict[str, object] = {
+        "messaging_product": "whatsapp",
+        "status": "read",
+        "message_id": "wamid.incoming",
+    }
+    if typing_indicator:
+        expected["typing_indicator"] = {"type": "text"}
+    assert json.loads(request["data"]) == expected
+
+
+def test_rejects_invalid_read_receipt_results_and_inputs() -> None:
+    invalid_result = _Session([_Response({"success": False})])
+    with pytest.raises(WhatsAppApiError, match="read receipt result"):
+        asyncio.run(
+            WhatsAppApiClient(invalid_result, TOKEN).mark_message_read(
+                SENDER_ID,
+                {"message_id": "wamid.incoming"},
+            )
+        )
+
+    no_request = _Session([])
+    with pytest.raises(WhatsAppApiError, match="typing indicator"):
+        asyncio.run(
+            WhatsAppApiClient(no_request, TOKEN).mark_message_read(
+                SENDER_ID,
+                {"message_id": "wamid.incoming", "typing_indicator": "yes"},
+            )
+        )
+    assert no_request.requests == []
+
+
+def test_read_receipt_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response({"success": True})], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            mark_message_read(
+                SENDER_ID,
+                {"message_id": "wamid.incoming", "typing_indicator": True},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["read"] is True
     assert events == ["approval", "stored-input", "provider"]
