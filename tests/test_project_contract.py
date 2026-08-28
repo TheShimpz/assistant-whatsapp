@@ -11,6 +11,7 @@ from actions.mark_message_read import run as mark_message_read
 from actions.send_catalog_message import run as send_catalog_message
 from actions.send_choice_message import run as send_choice_message
 from actions.send_contacts_message import run as send_contacts_message
+from actions.send_flow_message import run as send_flow_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_template_message import run as send_template_message
@@ -45,6 +46,7 @@ def test_action_declares_exact_human_and_stored_input_contract() -> None:
         send_choice_message,
         send_catalog_message,
         send_contacts_message,
+        send_flow_message,
         send_location_message,
         send_media_message,
         send_template_message,

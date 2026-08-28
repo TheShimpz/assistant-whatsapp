@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib.interactives import build_choice_message, build_commerce_message
+from lib.interactives import build_choice_message, build_commerce_message, build_flow_message
 from lib.whatsapp import WhatsAppApiError
 
 
@@ -195,3 +195,98 @@ def test_builds_product_product_list_and_catalog_messages() -> None:
 def test_rejects_invalid_commerce_messages(message: dict[str, object]) -> None:
     with pytest.raises(WhatsAppApiError):
         build_commerce_message(message)
+
+
+def test_builds_published_flow_by_id_or_name() -> None:
+    by_id = build_flow_message(
+        {
+            "flow_id": "987654321",
+            "flow_token": "appointment-42",
+            "flow_cta": "Agendar",
+            "flow_action": "navigate",
+            "screen": "APPOINTMENT",
+            "data": [{"key": "customer_id", "value": "42"}],
+            "header": {"header_type": "text", "text": "Agendamento"},
+            "body": "Escolha um horário",
+            "footer": "Example Clinic",
+        }
+    )
+    assert by_id == {
+        "type": "flow",
+        "header": {"type": "text", "text": "Agendamento"},
+        "body": {"text": "Escolha um horário"},
+        "footer": {"text": "Example Clinic"},
+        "action": {
+            "name": "flow",
+            "parameters": {
+                "flow_message_version": "3",
+                "flow_action": "navigate",
+                "flow_token": "appointment-42",
+                "flow_id": "987654321",
+                "flow_cta": "Agendar",
+                "flow_action_payload": {"screen": "APPOINTMENT", "data": {"customer_id": "42"}},
+            },
+        },
+    }
+
+    by_name = build_flow_message(
+        {
+            "flow_name": "support_intake",
+            "flow_token": "support-43",
+            "flow_cta": "Começar",
+            "flow_action": "data_exchange",
+            "data": [{"key": "ticket_id", "value": "43"}],
+            "body": "Conte o que aconteceu",
+        }
+    )
+    assert by_name["action"]["parameters"]["flow_name"] == "support_intake"
+    assert by_name["action"]["parameters"]["flow_action"] == "data_exchange"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {
+            "flow_token": "token",
+            "flow_cta": "Open",
+            "flow_action": "navigate",
+            "screen": "START",
+            "body": "Body",
+        },
+        {
+            "flow_id": "1",
+            "flow_name": "duplicate",
+            "flow_token": "token",
+            "flow_cta": "Open",
+            "flow_action": "navigate",
+            "screen": "START",
+            "body": "Body",
+        },
+        {
+            "flow_id": "1",
+            "flow_token": "token",
+            "flow_cta": "Open",
+            "flow_action": "navigate",
+            "body": "Body",
+        },
+        {
+            "flow_id": "1",
+            "flow_token": "token",
+            "flow_cta": "Open",
+            "flow_action": "data_exchange",
+            "screen": "NOT_ALLOWED",
+            "body": "Body",
+        },
+        {
+            "flow_id": "1",
+            "flow_token": "token",
+            "flow_cta": "Open",
+            "flow_action": "data_exchange",
+            "data": [{"key": "duplicate", "value": "1"}, {"key": "duplicate", "value": "2"}],
+            "body": "Body",
+        },
+    ],
+)
+def test_rejects_invalid_flow_messages(message: dict[str, object]) -> None:
+    with pytest.raises(WhatsAppApiError):
+        build_flow_message(message)

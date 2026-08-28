@@ -76,6 +76,24 @@ class CommerceMessage(TypedDict):
     thumbnail_product_retailer_id: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 256}]]
 
 
+class FlowDataEntry(TypedDict):
+    key: Annotated[str, {"minLength": 1, "maxLength": 64, "pattern": r"^[A-Za-z][A-Za-z0-9_]*$"}]
+    value: Annotated[str, {"maxLength": 1024}]
+
+
+class FlowMessage(TypedDict):
+    flow_id: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 512}]]
+    flow_name: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 512}]]
+    flow_token: Annotated[str, "Non-secret Flow response correlation token.", {"minLength": 1, "maxLength": 1024}]
+    flow_cta: Annotated[str, {"minLength": 1, "maxLength": 30}]
+    flow_action: Literal["navigate", "data_exchange"]
+    screen: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 64}]]
+    data: NotRequired[Annotated[list[FlowDataEntry], {"minItems": 1, "maxItems": 20}]]
+    header: NotRequired[InteractiveHeader]
+    body: BodyText
+    footer: NotRequired[FooterText]
+
+
 def build_choice_message(value: object) -> tuple[dict[str, object], str | None]:
     """Build a reply-button or list interactive object and optional reply context."""
     message = _closed_object(
@@ -143,6 +161,79 @@ def commerce_message_summary(interactive: dict[str, object]) -> str:
         count = sum(len(section["product_items"]) for section in interactive["action"]["sections"])
         return f"product list with {count} products"
     return str(interactive["type"]).replace("_", " ")
+
+
+def build_flow_message(value: object) -> dict[str, object]:
+    """Build one published WhatsApp Flow interactive object."""
+    message = _closed_object(
+        value,
+        required={"flow_token", "flow_cta", "flow_action", "body"},
+        optional={"flow_id", "flow_name", "screen", "data", "header", "footer"},
+    )
+    identities = [field for field in ("flow_id", "flow_name") if field in message]
+    if len(identities) != 1:
+        raise WhatsAppApiError("WhatsApp Flow identity is invalid")
+    flow_action = message["flow_action"]
+    if not isinstance(flow_action, str) or flow_action not in {"navigate", "data_exchange"}:
+        raise WhatsAppApiError("WhatsApp Flow action is invalid")
+    if (flow_action == "navigate") != ("screen" in message):
+        raise WhatsAppApiError("WhatsApp Flow screen is invalid")
+    parameters: dict[str, object] = {
+        "flow_message_version": "3",
+        "flow_action": flow_action,
+        "flow_token": _public_text(message["flow_token"], 1024),
+        identities[0]: _public_text(message[identities[0]], 512),
+        "flow_cta": _bounded_message_text(message["flow_cta"], 30),
+    }
+    payload: dict[str, object] = {}
+    if "screen" in message:
+        payload["screen"] = _public_text(message["screen"], 64)
+    if "data" in message:
+        payload["data"] = _flow_data(message["data"])
+    if payload:
+        parameters["flow_action_payload"] = payload
+    result: dict[str, object] = {
+        "type": "flow",
+        "body": {"text": _bounded_message_text(message["body"], 1024)},
+        "action": {"name": "flow", "parameters": parameters},
+    }
+    if "header" in message:
+        result["header"] = _interactive_header(message["header"], allow_media=True)
+    if "footer" in message:
+        result["footer"] = {"text": _bounded_message_text(message["footer"], 60)}
+    return result
+
+
+def flow_message_summary(interactive: dict[str, object]) -> str:
+    """Return a bounded approval summary for one built Flow message."""
+    parameters = interactive["action"]["parameters"]
+    identity = "flow_id" if "flow_id" in parameters else "flow_name"
+    return f"published Flow {parameters[identity]}"
+
+
+def _flow_data(value: object) -> dict[str, str]:
+    entries = _bounded_list(value, minimum=1, maximum=20)
+    result: dict[str, str] = {}
+    for entry in entries:
+        item = _closed_object(entry, required={"key", "value"}, optional=set())
+        key = _public_text(item["key"], 64)
+        if not _data_key(key) or key in result:
+            raise WhatsAppApiError("WhatsApp Flow data is invalid")
+        raw_value = item["value"]
+        if (
+            not isinstance(raw_value, str)
+            or len(raw_value) > 1024
+            or any(ord(character) < 32 or ord(character) == 127 for character in raw_value)
+        ):
+            raise WhatsAppApiError("WhatsApp Flow data is invalid")
+        result[key] = raw_value
+    return result
+
+
+def _data_key(value: str) -> bool:
+    return bool(value) and value[0].isascii() and value[0].isalpha() and all(
+        character.isascii() and (character.isalnum() or character == "_") for character in value
+    )
 
 
 def _single_product(message: dict[str, object]) -> dict[str, object]:

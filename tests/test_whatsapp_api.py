@@ -14,6 +14,7 @@ from actions.mark_message_read import run as mark_message_read
 from actions.send_catalog_message import run as send_catalog_message
 from actions.send_choice_message import run as send_choice_message
 from actions.send_contacts_message import run as send_contacts_message
+from actions.send_flow_message import run as send_flow_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_template_message import run as send_template_message
@@ -673,4 +674,28 @@ def test_catalog_action_orders_approval_before_stored_input_and_provider() -> No
         )
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "product"
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_flow_message(
+                SENDER_ID,
+                RECIPIENT,
+                {
+                    "flow_id": "987654321",
+                    "flow_token": "appointment-42",
+                    "flow_cta": "Schedule",
+                    "flow_action": "navigate",
+                    "screen": "APPOINTMENT",
+                    "body": "Choose a time",
+                },
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "flow"
     assert events == ["approval", "stored-input", "provider"]
