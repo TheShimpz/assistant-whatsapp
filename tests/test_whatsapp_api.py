@@ -755,3 +755,26 @@ def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "flow"
     assert events == ["approval", "stored-input", "provider"]
+
+
+def test_long_flow_name_fits_the_approval_description() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_flow_message(
+                SENDER_ID,
+                RECIPIENT,
+                {
+                    "flow_name": "f" * 512,
+                    "flow_token": "appointment-42",
+                    "flow_cta": "Schedule",
+                    "flow_action": "navigate",
+                    "screen": "APPOINTMENT",
+                    "body": "Choose a time",
+                },
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]

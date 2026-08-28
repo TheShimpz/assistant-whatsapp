@@ -13,6 +13,7 @@ from lib.whatsapp import (
     _https_url,
     _message_id,
     _public_text,
+    approval_identifier,
 )
 
 BodyText = Annotated[str, "Interactive message body.", {"minLength": 1, "maxLength": 1024}]
@@ -208,7 +209,10 @@ def flow_message_summary(interactive: dict[str, object]) -> str:
     """Return a bounded approval summary for one built Flow message."""
     parameters = interactive["action"]["parameters"]
     identity = "flow_id" if "flow_id" in parameters else "flow_name"
-    return f"published Flow {parameters[identity]}"
+    identifier = parameters[identity]
+    if not isinstance(identifier, str):
+        raise WhatsAppApiError("WhatsApp Flow identity is invalid")
+    return f"published Flow {approval_identifier(identifier)}"
 
 
 def _flow_data(value: object) -> dict[str, str]:
