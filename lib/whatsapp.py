@@ -264,6 +264,17 @@ class WhatsAppApiClient:
         destination = _recipient(recipient)
         return await self._send_message(sender, destination, "template", template, None)
 
+    async def send_interactive_message(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        interactive: dict[str, object],
+        reply_to_message_id: str | None = None,
+    ) -> SendMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        return await self._send_message(sender, destination, "interactive", interactive, reply_to_message_id)
+
     async def _send_message(
         self,
         sender: str,

@@ -11,6 +11,7 @@ from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
 
 from actions.mark_message_read import run as mark_message_read
+from actions.send_choice_message import run as send_choice_message
 from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
@@ -629,4 +630,25 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
         "name": "hello_world",
         "language": {"code": "en_US"},
     }
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def test_choice_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_choice_message(
+                SENDER_ID,
+                RECIPIENT,
+                {
+                    "choice_type": "button",
+                    "body": "Choose one",
+                    "buttons": [{"id": "yes", "title": "Yes"}, {"id": "no", "title": "No"}],
+                },
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "button"
     assert events == ["approval", "stored-input", "provider"]
