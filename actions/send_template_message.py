@@ -4,7 +4,7 @@ from shimpz import Context, action
 
 from lib.runtime import approved_whatsapp_client
 from lib.templates import TemplateMessage, build_template_message
-from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
+from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult, approval_identifier
 
 
 @action(
@@ -19,7 +19,7 @@ async def run(
     ctx: Context,
 ) -> SendMessageResult:
     template = build_template_message(message)
-    summary = f"approved template {message['name']} in {message['language_code']}"
+    summary = f"approved template {approval_identifier(message['name'])} in {message['language_code']}"
     async with approved_whatsapp_client(
         ctx,
         title="Send this WhatsApp template",

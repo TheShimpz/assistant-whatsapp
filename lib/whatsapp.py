@@ -694,7 +694,14 @@ def read_receipt_summary(value: object) -> str:
     """Validate one read receipt and return a bounded approval summary."""
     message_id, typing_indicator = _read_receipt(value)
     typing = " and show a typing indicator" if typing_indicator else ""
-    return f"mark message {message_id} as read{typing}"
+    return f"mark message {approval_identifier(message_id)} as read{typing}"
+
+
+def approval_identifier(value: str) -> str:
+    """Keep identifiers recognizable while respecting the approval description bound."""
+    if len(value) <= 128:
+        return value
+    return f"{value[:80]}…{value[-32:]} (truncated)"
 
 
 def _valid_reaction_emoji(value: str) -> bool:

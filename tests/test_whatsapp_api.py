@@ -92,6 +92,7 @@ class _ActionContext:
     def request_approval(self, *, title: str, description: str) -> None:
         assert "WhatsApp" in title
         assert TOKEN not in description
+        assert len(description) <= 500
         self.events.append("approval")
 
     def request_input(self, request: InputRequest) -> str:
@@ -639,6 +640,21 @@ def test_read_receipt_action_orders_approval_before_stored_input_and_provider() 
     assert events == ["approval", "stored-input", "provider"]
 
 
+def test_long_message_id_fits_the_approval_description() -> None:
+    events: list[str] = []
+    session = _Session([_Response({"success": True})], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            mark_message_read(
+                SENDER_ID,
+                {"message_id": f"wamid.{('a' * 506)}"},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["read"] is True
+    assert events == ["approval", "stored-input", "provider"]
+
+
 def test_template_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
     session = _Session([_Response(_success())], events)
@@ -656,6 +672,22 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
         "name": "hello_world",
         "language": {"code": "en_US"},
     }
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def test_long_template_name_fits_the_approval_description() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_template_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"name": "a" * 512, "language_code": "en_US"},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
 
 
