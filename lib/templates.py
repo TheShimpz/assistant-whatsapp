@@ -1,7 +1,5 @@
 """Typed WhatsApp message-template request builders."""
 
-from __future__ import annotations
-
 import re
 from typing import Annotated, Literal, NotRequired, TypedDict
 

@@ -1,7 +1,5 @@
 """Typed WhatsApp interactive-message request builders."""
 
-from __future__ import annotations
-
 from typing import Annotated, Literal, NotRequired, TypedDict
 
 from lib.whatsapp import (
