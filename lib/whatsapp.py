@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 from urllib.parse import quote
 
 import aiohttp
@@ -30,6 +30,13 @@ Recipient = Annotated[
     {"pattern": _RECIPIENT_PATTERN},
 ]
 MessageText = Annotated[str, "WhatsApp text body.", {"minLength": 1, "maxLength": 4096}]
+MessageId = Annotated[str, "WhatsApp message id.", {"minLength": 7, "maxLength": 512, "pattern": r"^wamid\..+$"}]
+
+
+class TextMessage(TypedDict):
+    body: MessageText
+    preview_url: NotRequired[bool]
+    reply_to_message_id: NotRequired[MessageId]
 
 
 class SendTextMessageResult(TypedDict):
@@ -55,17 +62,21 @@ class WhatsAppApiClient:
         self,
         sender_phone_number_id: str,
         recipient: str,
-        message: str,
+        message: TextMessage,
     ) -> SendTextMessageResult:
         sender = _phone_number_id(sender_phone_number_id)
         destination = _recipient(recipient)
+        text = _text_message(message)
         body = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": destination,
             "type": "text",
-            "text": {"preview_url": False, "body": _message(message)},
+            "text": {"preview_url": text.get("preview_url", False), "body": text["body"]},
         }
+        reply_to = text.get("reply_to_message_id")
+        if reply_to is not None:
+            body["context"] = {"message_id": reply_to}
         encoded = json.dumps(body, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode()
         if not 1 <= len(encoded) <= MAX_REQUEST_BYTES:
             raise WhatsAppApiError("WhatsApp request size is invalid")
@@ -188,12 +199,32 @@ def _recipient(value: object) -> str:
     return value.removeprefix("+")
 
 
-def _message(value: object) -> str:
+def _message_text(value: object) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 4096 or value != value.strip():
         raise WhatsAppApiError("WhatsApp message is invalid")
     if any((ord(character) < 32 and character not in "\n\t") or ord(character) == 127 for character in value):
         raise WhatsAppApiError("WhatsApp message is invalid")
     return value
+
+
+def _text_message(value: object) -> TextMessage:
+    message = _closed_object(value, required={"body"}, optional={"preview_url", "reply_to_message_id"})
+    result: TextMessage = {"body": _message_text(message["body"])}
+    if "preview_url" in message:
+        preview_url = message["preview_url"]
+        if type(preview_url) is not bool:
+            raise WhatsAppApiError("WhatsApp text preview option is invalid")
+        result["preview_url"] = preview_url
+    if "reply_to_message_id" in message:
+        result["reply_to_message_id"] = _message_id(message["reply_to_message_id"])
+    return result
+
+
+def _message_id(value: object) -> str:
+    message_id = _public_text(value, 512)
+    if not message_id.startswith("wamid."):
+        raise WhatsAppApiError("WhatsApp message id is invalid")
+    return message_id
 
 
 def _whatsapp_id(value: object) -> str:
@@ -216,6 +247,14 @@ def _error_code(payload: dict[str, Any]) -> int | None:
         return None
     code = error.get("code")
     return code if type(code) is int else None
+
+
+def _closed_object(value: object, *, required: set[str], optional: set[str]) -> dict[str, object]:
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise WhatsAppApiError("WhatsApp object is invalid")
+    if set(value) - required - optional or not required.issubset(value):
+        raise WhatsAppApiError("WhatsApp object is invalid")
+    return value
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

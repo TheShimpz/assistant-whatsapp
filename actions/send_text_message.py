@@ -4,10 +4,10 @@ from shimpz import Context, action
 
 from lib.runtime import approved_whatsapp_client
 from lib.whatsapp import (
-    MessageText,
     PhoneNumberId,
     Recipient,
     SendTextMessageResult,
+    TextMessage,
 )
 
 
@@ -18,7 +18,7 @@ from lib.whatsapp import (
 async def run(
     sender_phone_number_id: PhoneNumberId,
     recipient: Recipient,
-    message: MessageText,
+    message: TextMessage,
     *,
     ctx: Context,
 ) -> SendTextMessageResult:
