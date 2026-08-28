@@ -10,6 +10,7 @@ import pytest
 from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
 
+from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_text_message import run as send_text_message
@@ -82,7 +83,7 @@ class _ActionContext:
         self.events = events
 
     def request_approval(self, *, title: str, description: str) -> None:
-        assert title.startswith("Send this WhatsApp")
+        assert "WhatsApp" in title
         assert TOKEN not in description
         self.events.append("approval")
 
@@ -407,6 +408,83 @@ def test_location_action_orders_approval_before_stored_input_and_provider() -> N
                 SENDER_ID,
                 RECIPIENT,
                 {"latitude": -23.55052, "longitude": -46.633308},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]
+
+
+def _complete_contact() -> dict[str, object]:
+    return {
+        "name": {"formatted_name": "Ana Silva", "first_name": "Ana", "last_name": "Silva"},
+        "addresses": [
+            {
+                "street": "Avenida Paulista, 1000",
+                "city": "São Paulo",
+                "state": "SP",
+                "zip": "01310-100",
+                "country": "Brasil",
+                "country_code": "BR",
+                "type": "WORK",
+            }
+        ],
+        "birthday": "1990-05-12",
+        "emails": [{"email": "ana@example.com", "type": "WORK"}],
+        "org": {"company": "Example", "department": "Operations", "title": "Manager"},
+        "phones": [{"phone": "+55 11 99999-0000", "wa_id": "5511999990000", "type": "WORK"}],
+        "urls": [{"url": "https://example.com/ana", "type": "WORK"}],
+    }
+
+
+def test_sends_complete_contact_cards_and_reply_context() -> None:
+    session = _Session([_Response(_success())])
+    asyncio.run(
+        WhatsAppApiClient(session, TOKEN).send_contacts_message(
+            SENDER_ID,
+            RECIPIENT,
+            {"contacts": [_complete_contact()], "reply_to_message_id": "wamid.previous"},
+        )
+    )
+    payload = json.loads(session.requests[0][1]["data"])
+    assert payload["type"] == "contacts"
+    assert payload["context"] == {"message_id": "wamid.previous"}
+    assert payload["contacts"] == [
+        {
+            **_complete_contact(),
+            "addresses": [{**_complete_contact()["addresses"][0], "country_code": "br"}],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"contacts": []},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "emails": [{"email": "invalid"}]}]},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "org": {}}]},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "phones": [{"type": "WORK"}]}]},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "birthday": "2023-02-29"}]},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "urls": [{"url": "http://example.com"}]}]},
+        {"contacts": [{"name": {"formatted_name": "Ana"}, "unknown": "field"}]},
+    ],
+)
+def test_rejects_invalid_contact_cards_before_provider(message: dict[str, object]) -> None:
+    session = _Session([])
+    with pytest.raises(WhatsAppApiError):
+        asyncio.run(WhatsAppApiClient(session, TOKEN).send_contacts_message(SENDER_ID, RECIPIENT, message))
+    assert session.requests == []
+
+
+def test_contacts_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_contacts_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"contacts": [{"name": {"formatted_name": "Ana Silva"}}]},
                 ctx=_ActionContext(events),
             )
         )

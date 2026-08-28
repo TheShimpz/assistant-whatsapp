@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from ipaddress import ip_address
 from math import isfinite
 from typing import Annotated, Any, Literal, NotRequired, TypedDict
@@ -44,6 +45,17 @@ MediaFilename = Annotated[str, "Document filename.", {"minLength": 1, "maxLength
 Latitude = Annotated[float, "Location latitude.", {"minimum": -90.0, "maximum": 90.0}]
 Longitude = Annotated[float, "Location longitude.", {"minimum": -180.0, "maximum": 180.0}]
 LocationText = Annotated[str, "Location name or address.", {"minLength": 1, "maxLength": 1000}]
+ContactText = Annotated[str, "Contact field.", {"minLength": 1, "maxLength": 256}]
+ContactEmailValue = Annotated[
+    str,
+    "Contact email address.",
+    {"minLength": 3, "maxLength": 254, "pattern": r"^[^\s@]+@[^\s@]+\.[^\s@]+$"},
+]
+ContactUrlValue = Annotated[
+    str,
+    "Contact HTTPS URL.",
+    {"minLength": 9, "maxLength": 2048, "pattern": r"^https://"},
+]
 
 
 class TextMessage(TypedDict):
@@ -66,6 +78,62 @@ class LocationMessage(TypedDict):
     longitude: Longitude
     name: NotRequired[LocationText]
     address: NotRequired[LocationText]
+    reply_to_message_id: NotRequired[MessageId]
+
+
+class ContactName(TypedDict):
+    formatted_name: ContactText
+    first_name: NotRequired[ContactText]
+    last_name: NotRequired[ContactText]
+    middle_name: NotRequired[ContactText]
+    suffix: NotRequired[ContactText]
+    prefix: NotRequired[ContactText]
+
+
+class ContactAddress(TypedDict):
+    street: NotRequired[ContactText]
+    city: NotRequired[ContactText]
+    state: NotRequired[ContactText]
+    zip: NotRequired[ContactText]
+    country: NotRequired[ContactText]
+    country_code: NotRequired[Annotated[str, {"minLength": 2, "maxLength": 2, "pattern": r"^[A-Za-z]{2}$"}]]
+    type: NotRequired[Literal["HOME", "WORK"]]
+
+
+class ContactEmail(TypedDict):
+    email: ContactEmailValue
+    type: NotRequired[Literal["HOME", "WORK"]]
+
+
+class ContactOrganization(TypedDict):
+    company: NotRequired[ContactText]
+    department: NotRequired[ContactText]
+    title: NotRequired[ContactText]
+
+
+class ContactPhone(TypedDict):
+    phone: NotRequired[Annotated[str, {"minLength": 3, "maxLength": 32}]]
+    wa_id: NotRequired[Annotated[str, {"minLength": 8, "maxLength": 20, "pattern": r"^[1-9][0-9]{7,19}$"}]]
+    type: NotRequired[Literal["HOME", "WORK"]]
+
+
+class ContactUrl(TypedDict):
+    url: ContactUrlValue
+    type: NotRequired[Literal["HOME", "WORK"]]
+
+
+class Contact(TypedDict):
+    name: ContactName
+    addresses: NotRequired[Annotated[list[ContactAddress], {"minItems": 1, "maxItems": 3}]]
+    birthday: NotRequired[Annotated[str, {"minLength": 10, "maxLength": 10, "pattern": r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}]]
+    emails: NotRequired[Annotated[list[ContactEmail], {"minItems": 1, "maxItems": 3}]]
+    org: NotRequired[ContactOrganization]
+    phones: NotRequired[Annotated[list[ContactPhone], {"minItems": 1, "maxItems": 5}]]
+    urls: NotRequired[Annotated[list[ContactUrl], {"minItems": 1, "maxItems": 3}]]
+
+
+class ContactsMessage(TypedDict):
+    contacts: Annotated[list[Contact], {"minItems": 1, "maxItems": 10}]
     reply_to_message_id: NotRequired[MessageId]
 
 
@@ -127,12 +195,23 @@ class WhatsAppApiClient:
         location, reply_to = _location_message(message)
         return await self._send_message(sender, destination, "location", location, reply_to)
 
+    async def send_contacts_message(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        message: ContactsMessage,
+    ) -> SendMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        contacts, reply_to = _contacts_message(message)
+        return await self._send_message(sender, destination, "contacts", contacts, reply_to)
+
     async def _send_message(
         self,
         sender: str,
         destination: str,
         message_type: str,
-        content: dict[str, object],
+        content: object,
         reply_to_message_id: str | None,
     ) -> SendMessageResult:
         body: dict[str, object] = {
@@ -359,6 +438,152 @@ def _coordinate(value: object, *, minimum: float, maximum: float) -> float:
     if not isfinite(coordinate) or not minimum <= coordinate <= maximum:
         raise WhatsAppApiError("WhatsApp location coordinate is invalid")
     return coordinate
+
+
+def _contacts_message(value: object) -> tuple[list[dict[str, object]], str | None]:
+    message = _closed_object(value, required={"contacts"}, optional={"reply_to_message_id"})
+    contacts = _bounded_list(message["contacts"], minimum=1, maximum=10)
+    result = [_contact(item) for item in contacts]
+    reply_to = _message_id(message["reply_to_message_id"]) if "reply_to_message_id" in message else None
+    return result, reply_to
+
+
+def contacts_message_summary(value: object) -> str:
+    """Validate one contacts request and return a bounded approval summary."""
+    contacts, reply_to = _contacts_message(value)
+    reply = " as a reply" if reply_to is not None else ""
+    noun = "contact" if len(contacts) == 1 else "contacts"
+    return f"{len(contacts)} {noun}{reply}"
+
+
+def _contact(value: object) -> dict[str, object]:
+    contact = _closed_object(
+        value,
+        required={"name"},
+        optional={"addresses", "birthday", "emails", "org", "phones", "urls"},
+    )
+    result: dict[str, object] = {"name": _contact_name(contact["name"])}
+    if "addresses" in contact:
+        result["addresses"] = [
+            _contact_address(item) for item in _bounded_list(contact["addresses"], minimum=1, maximum=3)
+        ]
+    if "birthday" in contact:
+        result["birthday"] = _birthday(contact["birthday"])
+    if "emails" in contact:
+        result["emails"] = [
+            _contact_email(item) for item in _bounded_list(contact["emails"], minimum=1, maximum=3)
+        ]
+    if "org" in contact:
+        result["org"] = _contact_organization(contact["org"])
+    if "phones" in contact:
+        result["phones"] = [
+            _contact_phone(item) for item in _bounded_list(contact["phones"], minimum=1, maximum=5)
+        ]
+    if "urls" in contact:
+        result["urls"] = [
+            _contact_url(item) for item in _bounded_list(contact["urls"], minimum=1, maximum=3)
+        ]
+    return result
+
+
+def _contact_name(value: object) -> dict[str, object]:
+    name = _closed_object(
+        value,
+        required={"formatted_name"},
+        optional={"first_name", "last_name", "middle_name", "suffix", "prefix"},
+    )
+    return _text_fields(name, maximum=256)
+
+
+def _contact_address(value: object) -> dict[str, object]:
+    address = _closed_object(
+        value,
+        required=set(),
+        optional={"street", "city", "state", "zip", "country", "country_code", "type"},
+    )
+    if not address or set(address) == {"type"}:
+        raise WhatsAppApiError("WhatsApp contact address is invalid")
+    result = _text_fields(address, maximum=256, excluded={"type", "country_code"})
+    if "country_code" in address:
+        country_code = _public_text(address["country_code"], 2)
+        if re.fullmatch(r"[A-Za-z]{2}", country_code) is None:
+            raise WhatsAppApiError("WhatsApp contact country code is invalid")
+        result["country_code"] = country_code.lower()
+    _copy_contact_type(address, result)
+    return result
+
+
+def _contact_email(value: object) -> dict[str, object]:
+    email = _closed_object(value, required={"email"}, optional={"type"})
+    address = _public_text(email["email"], 254)
+    if re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", address) is None:
+        raise WhatsAppApiError("WhatsApp contact email is invalid")
+    result: dict[str, object] = {"email": address}
+    _copy_contact_type(email, result)
+    return result
+
+
+def _contact_organization(value: object) -> dict[str, object]:
+    organization = _closed_object(value, required=set(), optional={"company", "department", "title"})
+    if not organization:
+        raise WhatsAppApiError("WhatsApp contact organization is invalid")
+    return _text_fields(organization, maximum=256)
+
+
+def _contact_phone(value: object) -> dict[str, object]:
+    phone = _closed_object(value, required=set(), optional={"phone", "wa_id", "type"})
+    if not ({"phone", "wa_id"} & set(phone)):
+        raise WhatsAppApiError("WhatsApp contact phone is invalid")
+    result: dict[str, object] = {}
+    if "phone" in phone:
+        result["phone"] = _public_text(phone["phone"], 32)
+    if "wa_id" in phone:
+        result["wa_id"] = _whatsapp_id(phone["wa_id"])
+    _copy_contact_type(phone, result)
+    return result
+
+
+def _contact_url(value: object) -> dict[str, object]:
+    contact_url = _closed_object(value, required={"url"}, optional={"type"})
+    result: dict[str, object] = {"url": _https_url(contact_url["url"])}
+    _copy_contact_type(contact_url, result)
+    return result
+
+
+def _copy_contact_type(source: dict[str, object], target: dict[str, object]) -> None:
+    if "type" not in source:
+        return
+    contact_type = source["type"]
+    if not isinstance(contact_type, str) or contact_type not in {"HOME", "WORK"}:
+        raise WhatsAppApiError("WhatsApp contact field type is invalid")
+    target["type"] = contact_type
+
+
+def _text_fields(
+    value: dict[str, object],
+    *,
+    maximum: int,
+    excluded: set[str] | None = None,
+) -> dict[str, object]:
+    omitted = excluded or set()
+    return {key: _bounded_message_text(item, maximum) for key, item in value.items() if key not in omitted}
+
+
+def _birthday(value: object) -> str:
+    birthday = _public_text(value, 10)
+    try:
+        parsed = date.fromisoformat(birthday)
+    except ValueError:
+        raise WhatsAppApiError("WhatsApp contact birthday is invalid") from None
+    if parsed.isoformat() != birthday:
+        raise WhatsAppApiError("WhatsApp contact birthday is invalid")
+    return birthday
+
+
+def _bounded_list(value: object, *, minimum: int, maximum: int) -> list[object]:
+    if not isinstance(value, list) or not minimum <= len(value) <= maximum:
+        raise WhatsAppApiError("WhatsApp list is invalid")
+    return value
 
 
 def _message_id(value: object) -> str:
