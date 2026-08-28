@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date
 from ipaddress import ip_address
 from math import isfinite
@@ -137,6 +138,11 @@ class ContactsMessage(TypedDict):
     reply_to_message_id: NotRequired[MessageId]
 
 
+class ReactionMessage(TypedDict):
+    message_id: MessageId
+    emoji: Annotated[str, "One emoji, or an empty string to remove a reaction.", {"maxLength": 16}]
+
+
 class SendMessageResult(TypedDict):
     recipient: Recipient
     whatsapp_id: Annotated[str, {"pattern": r"^[1-9][0-9]{7,19}$"}]
@@ -205,6 +211,17 @@ class WhatsAppApiClient:
         destination = _recipient(recipient)
         contacts, reply_to = _contacts_message(message)
         return await self._send_message(sender, destination, "contacts", contacts, reply_to)
+
+    async def set_message_reaction(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        reaction: ReactionMessage,
+    ) -> SendMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        content = _reaction_message(reaction)
+        return await self._send_message(sender, destination, "reaction", content, None)
 
     async def _send_message(
         self,
@@ -584,6 +601,45 @@ def _bounded_list(value: object, *, minimum: int, maximum: int) -> list[object]:
     if not isinstance(value, list) or not minimum <= len(value) <= maximum:
         raise WhatsAppApiError("WhatsApp list is invalid")
     return value
+
+
+def _reaction_message(value: object) -> dict[str, object]:
+    reaction = _closed_object(value, required={"message_id", "emoji"}, optional=set())
+    emoji = reaction["emoji"]
+    if not isinstance(emoji, str) or not _valid_reaction_emoji(emoji):
+        raise WhatsAppApiError("WhatsApp reaction emoji is invalid")
+    return {"message_id": _message_id(reaction["message_id"]), "emoji": emoji}
+
+
+def reaction_message_summary(value: object) -> str:
+    """Validate one reaction request and return a bounded approval summary."""
+    reaction = _reaction_message(value)
+    emoji = reaction["emoji"]
+    return f"reaction {emoji}" if emoji else "reaction removal"
+
+
+def _valid_reaction_emoji(value: str) -> bool:
+    if value == "":
+        return True
+    pairs = [(character, unicodedata.category(character)) for character in value]
+    if len(value) > 16 or any(
+        character.isspace() or (category[0] == "C" and character != "\u200d")
+        for character, category in pairs
+    ):
+        return False
+    allowed = all(
+        category[0] in {"M", "S"} or character in {"#", "*", "\u200d"} or character.isdecimal()
+        for character, category in pairs
+    )
+    if not allowed:
+        return False
+    regional = [character for character, _category in pairs if "\U0001f1e6" <= character <= "\U0001f1ff"]
+    if regional:
+        return len(regional) == 2 and len(regional) == len(value)
+    if "\u20e3" in value:
+        return value[0] in "#*0123456789" and value.endswith("\u20e3")
+    symbols = [category for _character, category in pairs if category.startswith("S") and category != "Sk"]
+    return "\u200d" in value or len(symbols) == 1
 
 
 def _message_id(value: object) -> str:

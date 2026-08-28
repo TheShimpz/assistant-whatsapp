@@ -14,6 +14,7 @@ from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_text_message import run as send_text_message
+from actions.set_message_reaction import run as set_message_reaction
 from lib.whatsapp import (
     MAX_RESPONSE_BYTES,
     WhatsAppApiClient,
@@ -485,6 +486,55 @@ def test_contacts_action_orders_approval_before_stored_input_and_provider() -> N
                 SENDER_ID,
                 RECIPIENT,
                 {"contacts": [{"name": {"formatted_name": "Ana Silva"}}]},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]
+
+
+@pytest.mark.parametrize("emoji", ["👍🏽", "👩‍💻", "🇧🇷", "1️⃣", ""])
+def test_adds_or_removes_one_message_reaction(emoji: str) -> None:
+    session = _Session([_Response(_success())])
+    asyncio.run(
+        WhatsAppApiClient(session, TOKEN).set_message_reaction(
+            SENDER_ID,
+            RECIPIENT,
+            {"message_id": "wamid.target", "emoji": emoji},
+        )
+    )
+    assert json.loads(session.requests[0][1]["data"]) == {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": RECIPIENT,
+        "type": "reaction",
+        "reaction": {"message_id": "wamid.target", "emoji": emoji},
+    }
+
+
+@pytest.mark.parametrize("emoji", ["hello", "😀😀", " ", "😀\n"])
+def test_rejects_invalid_reactions_before_provider(emoji: str) -> None:
+    session = _Session([])
+    with pytest.raises(WhatsAppApiError):
+        asyncio.run(
+            WhatsAppApiClient(session, TOKEN).set_message_reaction(
+                SENDER_ID,
+                RECIPIENT,
+                {"message_id": "wamid.target", "emoji": emoji},
+            )
+        )
+    assert session.requests == []
+
+
+def test_reaction_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            set_message_reaction(
+                SENDER_ID,
+                RECIPIENT,
+                {"message_id": "wamid.target", "emoji": "✅"},
                 ctx=_ActionContext(events),
             )
         )

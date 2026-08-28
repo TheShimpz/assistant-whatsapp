@@ -11,6 +11,7 @@ from actions.send_contacts_message import run as send_contacts_message
 from actions.send_location_message import run as send_location_message
 from actions.send_media_message import run as send_media_message
 from actions.send_text_message import run as send_text_message
+from actions.set_message_reaction import run as set_message_reaction
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,7 +36,13 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
 
 
 def test_action_declares_exact_human_and_stored_input_contract() -> None:
-    for body in (send_contacts_message, send_location_message, send_media_message, send_text_message):
+    for body in (
+        send_contacts_message,
+        send_location_message,
+        send_media_message,
+        send_text_message,
+        set_message_reaction,
+    ):
         assert inspect.iscoroutinefunction(body)
         context = inspect.signature(body).parameters["ctx"]
         assert context.kind is inspect.Parameter.KEYWORD_ONLY
