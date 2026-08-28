@@ -30,6 +30,7 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
     assert metadata["spec"] == 1
     assert metadata["id"] == "whatsapp"
     assert re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", metadata["version"])
+    assert metadata["version"] == "0.2.0"
     assert manifest["network"] == {"allowed_hosts": ["graph.facebook.com"]}
     assert manifest["stored_inputs"] == {
         "whatsapp-token": {
