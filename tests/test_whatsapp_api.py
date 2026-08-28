@@ -182,10 +182,7 @@ def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
 
 
 def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -> None:
-    for response in (
-        _Response({"error": {"code": 190}}, status=400),
-        _Response({"error": {"code": 190}}, status=200),
-    ):
+    for response in (_Response({"error": {"code": 190}}, status=400),):
         with pytest.raises(WhatsAppTokenRejected):
             asyncio.run(
                 WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(
@@ -194,6 +191,8 @@ def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -
             )
 
     for response in (
+        _Response({"error": {"code": 190}}, status=200),
+        _Response({"error": {"code": 190}}, status=500),
         _Response({"error": {"code": 1}}, status=401),
         _Response({"error": {"code": 200}}, status=403),
         _Response({"error": {"code": 4}}, status=429),

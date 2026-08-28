@@ -313,7 +313,7 @@ class WhatsAppApiClient:
             ) as response:
                 raw = await _read_response(response)
                 payload = _json_object(raw)
-                if _error_code(payload) == 190:
+                if 400 <= response.status < 500 and _error_code(payload) == 190:
                     raise WhatsAppTokenRejected("WhatsApp rejected the access token")
                 if response.status != 200:
                     raise WhatsAppApiError("WhatsApp rejected the request")
