@@ -5,6 +5,7 @@ import json
 from typing import Any
 from unittest.mock import patch
 
+import aiohttp
 import pytest
 from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
@@ -143,7 +144,7 @@ def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
     session = _Session([_Response(_success())])
 
     result = asyncio.run(
-        WhatsAppApiClient(session).send_text_message(SENDER_ID, f"+{RECIPIENT}", "Hello", TOKEN)
+        WhatsAppApiClient(session, TOKEN).send_text_message(SENDER_ID, f"+{RECIPIENT}", "Hello")
     )
 
     assert result == {"recipient": RECIPIENT, "whatsapp_id": RECIPIENT, "message_id": "wamid.message-id"}
@@ -165,30 +166,30 @@ def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
 def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -> None:
     for response in (
         _Response({"error": {"code": 190}}, status=400),
-        _Response({"error": {"code": 1}}, status=401),
+        _Response({"error": {"code": 190}}, status=200),
     ):
         with pytest.raises(WhatsAppTokenRejected):
             asyncio.run(
-                WhatsAppApiClient(_Session([response])).send_text_message(SENDER_ID, RECIPIENT, "Hello", TOKEN)
+                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(SENDER_ID, RECIPIENT, "Hello")
             )
 
     for response in (
+        _Response({"error": {"code": 1}}, status=401),
         _Response({"error": {"code": 200}}, status=403),
         _Response({"error": {"code": 4}}, status=429),
-        _Response({"error": {"code": 190}}, status=200),
     ):
-        expected = WhatsAppTokenRejected if response.status == 200 else WhatsAppApiError
-        with pytest.raises(expected):
+        with pytest.raises(WhatsAppApiError) as failure:
             asyncio.run(
-                WhatsAppApiClient(_Session([response])).send_text_message(SENDER_ID, RECIPIENT, "Hello", TOKEN)
+                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(SENDER_ID, RECIPIENT, "Hello")
             )
+        assert not isinstance(failure.value, WhatsAppTokenRejected)
 
 
 def test_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
     session = _Session([_Response(_success())], events)
 
-    with patch("actions.send_text_message.create_http_session", return_value=session):
+    with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(send_text_message(SENDER_ID, RECIPIENT, "Hello", ctx=_ActionContext(events)))
 
     assert result["message_id"] == "wamid.message-id"
@@ -199,7 +200,7 @@ def test_action_clears_only_an_explicitly_rejected_token() -> None:
     rejected_events: list[str] = []
     rejected = _Session([_Response({"error": {"code": 190}}, status=400)], rejected_events)
     with (
-        patch("actions.send_text_message.create_http_session", return_value=rejected),
+        patch("lib.runtime.create_http_session", return_value=rejected),
         pytest.raises(_StoredInputRejected),
     ):
         asyncio.run(send_text_message(SENDER_ID, RECIPIENT, "Hello", ctx=_ActionContext(rejected_events)))
@@ -208,7 +209,7 @@ def test_action_clears_only_an_explicitly_rejected_token() -> None:
     denied_events: list[str] = []
     denied = _Session([_Response({"error": {"code": 200}}, status=403)], denied_events)
     with (
-        patch("actions.send_text_message.create_http_session", return_value=denied),
+        patch("lib.runtime.create_http_session", return_value=denied),
         pytest.raises(WhatsAppApiError),
     ):
         asyncio.run(send_text_message(SENDER_ID, RECIPIENT, "Hello", ctx=_ActionContext(denied_events)))
@@ -225,5 +226,17 @@ def test_rejects_ambiguous_or_oversized_provider_results() -> None:
     for response in invalid:
         with pytest.raises(WhatsAppApiError):
             asyncio.run(
-                WhatsAppApiClient(_Session([response])).send_text_message(SENDER_ID, RECIPIENT, "Hello", TOKEN)
+                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(SENDER_ID, RECIPIENT, "Hello")
             )
+
+
+def test_redacts_token_from_unexpected_transport_errors() -> None:
+    class _ExplodingSession:
+        def request(self, *_args: object, **_kwargs: object) -> _Response:
+            raise aiohttp.ClientConnectionError(f"transport accidentally exposed {TOKEN}")
+
+    with pytest.raises(WhatsAppApiError, match="WhatsApp request failed") as failure:
+        asyncio.run(WhatsAppApiClient(_ExplodingSession(), TOKEN).send_text_message(SENDER_ID, RECIPIENT, "Hello"))
+
+    assert failure.value.__cause__ is None
+    assert TOKEN not in str(failure.value)

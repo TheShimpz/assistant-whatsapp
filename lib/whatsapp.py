@@ -47,15 +47,15 @@ class WhatsAppTokenRejected(WhatsAppApiError):
 
 
 class WhatsAppApiClient:
-    def __init__(self, session: aiohttp.ClientSession) -> None:
+    def __init__(self, session: aiohttp.ClientSession, access_token: str) -> None:
         self._session = session
+        self._access_token = _access_token(access_token)
 
     async def send_text_message(
         self,
         sender_phone_number_id: str,
         recipient: str,
         message: str,
-        access_token: str,
     ) -> SendTextMessageResult:
         sender = _phone_number_id(sender_phone_number_id)
         destination = _recipient(recipient)
@@ -69,15 +69,15 @@ class WhatsAppApiClient:
         encoded = json.dumps(body, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode()
         if not 1 <= len(encoded) <= MAX_REQUEST_BYTES:
             raise WhatsAppApiError("WhatsApp request size is invalid")
-        payload = await self._post(sender, access_token, encoded)
+        payload = await self._post(sender, encoded)
         return _send_result(payload, destination)
 
-    async def _post(self, sender: str, access_token: str, body: bytes) -> dict[str, Any]:
+    async def _post(self, sender: str, body: bytes) -> dict[str, Any]:
         path = f"/{GRAPH_API_VERSION}/{quote(sender, safe='')}/messages"
         headers = {
             "Accept": "application/json",
             "Accept-Encoding": "identity",
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {self._access_token}",
             "Content-Type": "application/json",
         }
         try:
@@ -90,15 +90,15 @@ class WhatsAppApiClient:
             ) as response:
                 raw = await _read_response(response)
                 payload = _json_object(raw)
-                if response.status == 401 or _error_code(payload) == 190:
+                if _error_code(payload) == 190:
                     raise WhatsAppTokenRejected("WhatsApp rejected the access token")
                 if response.status != 200:
                     raise WhatsAppApiError("WhatsApp rejected the message")
                 return payload
         except WhatsAppApiError:
             raise
-        except Exception as exc:
-            raise WhatsAppApiError("WhatsApp request failed") from exc
+        except (aiohttp.ClientError, TimeoutError, OSError):
+            raise WhatsAppApiError("WhatsApp request failed") from None
 
 
 def create_http_session() -> aiohttp.ClientSession:
@@ -169,6 +169,16 @@ def _send_result(payload: dict[str, Any], recipient: str) -> SendTextMessageResu
 def _phone_number_id(value: object) -> str:
     if not isinstance(value, str) or _PHONE_NUMBER_ID.fullmatch(value) is None:
         raise WhatsAppApiError("WhatsApp sender phone-number id is invalid")
+    return value
+
+
+def _access_token(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 1024
+        or any(not 33 <= ord(character) <= 126 for character in value)
+    ):
+        raise WhatsAppApiError("WhatsApp access token is invalid")
     return value
 
 

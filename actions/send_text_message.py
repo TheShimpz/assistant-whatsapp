@@ -1,15 +1,13 @@
 """Send one reviewed WhatsApp text message."""
 
-from shimpz import Context, InputRequest, action
+from shimpz import Context, action
 
+from lib.runtime import approved_whatsapp_client
 from lib.whatsapp import (
     MessageText,
     PhoneNumberId,
     Recipient,
     SendTextMessageResult,
-    WhatsAppApiClient,
-    WhatsAppTokenRejected,
-    create_http_session,
 )
 
 
@@ -24,32 +22,12 @@ async def run(
     *,
     ctx: Context,
 ) -> SendTextMessageResult:
-    ctx.request_approval(
+    async with approved_whatsapp_client(
+        ctx,
         title="Send this WhatsApp message",
         description=(
             f"Send one reviewed text message from Meta phone-number id {sender_phone_number_id} "
             f"to {recipient}."
         ),
-    )
-    token = ctx.request_input(
-        InputRequest(
-            kind="password",
-            title="WhatsApp access token",
-            description="Enter the Meta access token used by this WhatsApp Action.",
-            label="Meta access token",
-            min_length=1,
-            max_length=1024,
-            stored_input="whatsapp-token",
-        )
-    )
-    try:
-        async with create_http_session() as session:
-            return await WhatsAppApiClient(session).send_text_message(
-                sender_phone_number_id,
-                recipient,
-                message,
-                token,
-            )
-    except WhatsAppTokenRejected:
-        ctx.reject_stored_input("whatsapp-token")
-        raise AssertionError("Stored Input rejection unexpectedly returned") from None
+    ) as client:
+        return await client.send_text_message(sender_phone_number_id, recipient, message)
