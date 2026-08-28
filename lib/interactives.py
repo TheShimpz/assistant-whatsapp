@@ -56,6 +56,26 @@ class ChoiceMessage(TypedDict):
     reply_to_message_id: NotRequired[MessageId]
 
 
+class ProductItem(TypedDict):
+    product_retailer_id: Annotated[str, {"minLength": 1, "maxLength": 256}]
+
+
+class ProductSection(TypedDict):
+    title: Annotated[str, {"minLength": 1, "maxLength": 24}]
+    product_items: Annotated[list[ProductItem], {"minItems": 1, "maxItems": 30}]
+
+
+class CommerceMessage(TypedDict):
+    commerce_type: Literal["product", "product_list", "catalog"]
+    catalog_id: NotRequired[Annotated[str, {"minLength": 5, "maxLength": 32, "pattern": r"^[1-9][0-9]+$"}]]
+    product_retailer_id: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 256}]]
+    header: NotRequired[HeaderText]
+    body: NotRequired[BodyText]
+    footer: NotRequired[FooterText]
+    sections: NotRequired[Annotated[list[ProductSection], {"minItems": 1, "maxItems": 10}]]
+    thumbnail_product_retailer_id: NotRequired[Annotated[str, {"minLength": 1, "maxLength": 256}]]
+
+
 def build_choice_message(value: object) -> tuple[dict[str, object], str | None]:
     """Build a reply-button or list interactive object and optional reply context."""
     message = _closed_object(
@@ -82,15 +102,126 @@ def build_choice_message(value: object) -> tuple[dict[str, object], str | None]:
     return result, reply_to
 
 
-def choice_message_summary(value: object) -> str:
-    """Validate one choice message and return a bounded approval summary."""
-    interactive, reply_to = build_choice_message(value)
+def choice_message_summary(interactive: dict[str, object], reply_to: str | None) -> str:
+    """Return a bounded approval summary for one built choice message."""
     action = interactive["action"]
     count = len(action["buttons"]) if interactive["type"] == "button" else sum(
         len(section["rows"]) for section in action["sections"]
     )
     reply = " as a reply" if reply_to is not None else ""
     return f"{interactive['type']} choice with {count} options{reply}"
+
+
+def build_commerce_message(value: object) -> dict[str, object]:
+    """Build a single-product, multi-product, or catalog interactive object."""
+    message = _closed_object(
+        value,
+        required={"commerce_type"},
+        optional={
+            "catalog_id",
+            "product_retailer_id",
+            "header",
+            "body",
+            "footer",
+            "sections",
+            "thumbnail_product_retailer_id",
+        },
+    )
+    commerce_type = message["commerce_type"]
+    if not isinstance(commerce_type, str) or commerce_type not in {"product", "product_list", "catalog"}:
+        raise WhatsAppApiError("WhatsApp commerce type is invalid")
+    if commerce_type == "product":
+        return _single_product(message)
+    if commerce_type == "product_list":
+        return _product_list(message)
+    return _catalog(message)
+
+
+def commerce_message_summary(interactive: dict[str, object]) -> str:
+    """Return a bounded approval summary for one built commerce message."""
+    if interactive["type"] == "product_list":
+        count = sum(len(section["product_items"]) for section in interactive["action"]["sections"])
+        return f"product list with {count} products"
+    return str(interactive["type"]).replace("_", " ")
+
+
+def _single_product(message: dict[str, object]) -> dict[str, object]:
+    required = {"commerce_type", "catalog_id", "product_retailer_id"}
+    if set(message) - required - {"body", "footer"} or not required.issubset(message):
+        raise WhatsAppApiError("WhatsApp single-product message is invalid")
+    result: dict[str, object] = {
+        "type": "product",
+        "action": {
+            "catalog_id": _catalog_id(message["catalog_id"]),
+            "product_retailer_id": _public_text(message["product_retailer_id"], 256),
+        },
+    }
+    _copy_body_footer(message, result)
+    return result
+
+
+def _product_list(message: dict[str, object]) -> dict[str, object]:
+    required = {"commerce_type", "catalog_id", "header", "body", "sections"}
+    if set(message) - required - {"footer"} or not required.issubset(message):
+        raise WhatsAppApiError("WhatsApp product-list message is invalid")
+    sections = [
+        _product_section(item) for item in _bounded_list(message["sections"], minimum=1, maximum=10)
+    ]
+    product_ids = [item["product_retailer_id"] for section in sections for item in section["product_items"]]
+    if not 1 <= len(product_ids) <= 30 or len(product_ids) != len(set(product_ids)):
+        raise WhatsAppApiError("WhatsApp product-list items are invalid")
+    result: dict[str, object] = {
+        "type": "product_list",
+        "header": {"type": "text", "text": _bounded_message_text(message["header"], 60)},
+        "body": {"text": _bounded_message_text(message["body"], 1024)},
+        "action": {"catalog_id": _catalog_id(message["catalog_id"]), "sections": sections},
+    }
+    if "footer" in message:
+        result["footer"] = {"text": _bounded_message_text(message["footer"], 60)}
+    return result
+
+
+def _product_section(value: object) -> dict[str, object]:
+    section = _closed_object(value, required={"title", "product_items"}, optional=set())
+    return {
+        "title": _bounded_message_text(section["title"], 24),
+        "product_items": [
+            _product_item(item) for item in _bounded_list(section["product_items"], minimum=1, maximum=30)
+        ],
+    }
+
+
+def _product_item(value: object) -> dict[str, object]:
+    item = _closed_object(value, required={"product_retailer_id"}, optional=set())
+    return {"product_retailer_id": _public_text(item["product_retailer_id"], 256)}
+
+
+def _catalog(message: dict[str, object]) -> dict[str, object]:
+    required = {"commerce_type", "body"}
+    if set(message) - required - {"footer", "thumbnail_product_retailer_id"} or not required.issubset(message):
+        raise WhatsAppApiError("WhatsApp catalog message is invalid")
+    action: dict[str, object] = {"name": "catalog_message"}
+    if "thumbnail_product_retailer_id" in message:
+        action["parameters"] = {
+            "thumbnail_product_retailer_id": _public_text(message["thumbnail_product_retailer_id"], 256)
+        }
+    result: dict[str, object] = {"type": "catalog_message", "action": action}
+    _copy_body_footer(message, result)
+    return result
+
+
+def _copy_body_footer(source: dict[str, object], target: dict[str, object]) -> None:
+    if "body" in source:
+        target["body"] = {"text": _bounded_message_text(source["body"], 1024)}
+    if "footer" in source:
+        target["footer"] = {"text": _bounded_message_text(source["footer"], 60)}
+
+
+def _catalog_id(value: object) -> str:
+    catalog_id = _public_text(value, 32)
+    if len(catalog_id) < 5 or not catalog_id.isascii() or not catalog_id.isdigit() or catalog_id.startswith("0"):
+        raise WhatsAppApiError("WhatsApp catalog id is invalid")
+    return catalog_id
 
 
 def _reply_button_action(message: dict[str, object]) -> dict[str, object]:

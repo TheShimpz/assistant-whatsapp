@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lib.interactives import build_choice_message
+from lib.interactives import build_choice_message, build_commerce_message
 from lib.whatsapp import WhatsAppApiError
 
 
@@ -97,3 +97,101 @@ def test_builds_reply_buttons_and_list_messages() -> None:
 def test_rejects_invalid_choice_messages(message: dict[str, object]) -> None:
     with pytest.raises(WhatsAppApiError):
         build_choice_message(message)
+
+
+def test_builds_product_product_list_and_catalog_messages() -> None:
+    assert build_commerce_message(
+        {
+            "commerce_type": "product",
+            "catalog_id": "367025965434465",
+            "product_retailer_id": "sku-1",
+            "body": "Produto recomendado",
+            "footer": "Example Store",
+        }
+    ) == {
+        "type": "product",
+        "body": {"text": "Produto recomendado"},
+        "footer": {"text": "Example Store"},
+        "action": {"catalog_id": "367025965434465", "product_retailer_id": "sku-1"},
+    }
+
+    product_list = build_commerce_message(
+        {
+            "commerce_type": "product_list",
+            "catalog_id": "367025965434465",
+            "header": "Ofertas",
+            "body": "Escolha os produtos",
+            "footer": "Example Store",
+            "sections": [
+                {
+                    "title": "Destaques",
+                    "product_items": [
+                        {"product_retailer_id": "sku-1"},
+                        {"product_retailer_id": "sku-2"},
+                    ],
+                }
+            ],
+        }
+    )
+    assert product_list["type"] == "product_list"
+    assert product_list["action"] == {
+        "catalog_id": "367025965434465",
+        "sections": [
+            {
+                "title": "Destaques",
+                "product_items": [
+                    {"product_retailer_id": "sku-1"},
+                    {"product_retailer_id": "sku-2"},
+                ],
+            }
+        ],
+    }
+
+    assert build_commerce_message(
+        {
+            "commerce_type": "catalog",
+            "body": "Conheça nosso catálogo",
+            "thumbnail_product_retailer_id": "sku-1",
+        }
+    ) == {
+        "type": "catalog_message",
+        "body": {"text": "Conheça nosso catálogo"},
+        "action": {
+            "name": "catalog_message",
+            "parameters": {"thumbnail_product_retailer_id": "sku-1"},
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"commerce_type": "product", "product_retailer_id": "sku-1"},
+        {
+            "commerce_type": "product",
+            "catalog_id": "367025965434465",
+            "product_retailer_id": "sku-1",
+            "sections": [],
+        },
+        {
+            "commerce_type": "product_list",
+            "catalog_id": "367025965434465",
+            "header": "Products",
+            "body": "Choose",
+            "sections": [
+                {
+                    "title": "One",
+                    "product_items": [
+                        {"product_retailer_id": "duplicate"},
+                        {"product_retailer_id": "duplicate"},
+                    ],
+                }
+            ],
+        },
+        {"commerce_type": "catalog", "catalog_id": "367025965434465", "body": "Catalog"},
+        {"commerce_type": "catalog"},
+    ],
+)
+def test_rejects_invalid_commerce_messages(message: dict[str, object]) -> None:
+    with pytest.raises(WhatsAppApiError):
+        build_commerce_message(message)
