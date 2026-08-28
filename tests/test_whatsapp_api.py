@@ -10,6 +10,7 @@ import pytest
 from shimpz import Context, InputRequest
 from shimpz._human import HumanRequestSuspension
 
+from actions.send_media_message import run as send_media_message
 from actions.send_text_message import run as send_text_message
 from lib.whatsapp import (
     MAX_RESPONSE_BYTES,
@@ -80,7 +81,7 @@ class _ActionContext:
         self.events = events
 
     def request_approval(self, *, title: str, description: str) -> None:
-        assert title == "Send this WhatsApp message"
+        assert title.startswith("Send this WhatsApp")
         assert TOKEN not in description
         self.events.append("approval")
 
@@ -271,3 +272,79 @@ def test_sends_text_preview_and_reply_context() -> None:
         "type": "text",
         "text": {"preview_url": True, "body": "See https://example.com"},
     }
+
+
+def test_sends_media_by_id_and_https_link_with_exact_fields() -> None:
+    image_session = _Session([_Response(_success())])
+    asyncio.run(
+        WhatsAppApiClient(image_session, TOKEN).send_media_message(
+            SENDER_ID,
+            RECIPIENT,
+            {
+                "media_type": "image",
+                "media_id": "123456789",
+                "caption": "Reviewed image",
+                "reply_to_message_id": "wamid.previous",
+            },
+        )
+    )
+    assert json.loads(image_session.requests[0][1]["data"]) == {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": RECIPIENT,
+        "type": "image",
+        "image": {"id": "123456789", "caption": "Reviewed image"},
+        "context": {"message_id": "wamid.previous"},
+    }
+
+    document_session = _Session([_Response(_success())])
+    asyncio.run(
+        WhatsAppApiClient(document_session, TOKEN).send_media_message(
+            SENDER_ID,
+            RECIPIENT,
+            {
+                "media_type": "document",
+                "link": "https://cdn.example.com/report.pdf?version=1",
+                "filename": "report.pdf",
+            },
+        )
+    )
+    assert json.loads(document_session.requests[0][1]["data"])["document"] == {
+        "link": "https://cdn.example.com/report.pdf?version=1",
+        "filename": "report.pdf",
+    }
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"media_type": "image"},
+        {"media_type": "image", "media_id": "1", "link": "https://cdn.example.com/a.jpg"},
+        {"media_type": "audio", "media_id": "1", "caption": "not supported"},
+        {"media_type": "video", "media_id": "1", "filename": "not-supported.mp4"},
+        {"media_type": "image", "link": "http://cdn.example.com/a.jpg"},
+        {"media_type": "image", "link": "https://user:secret@cdn.example.com/a.jpg"},
+        {"media_type": "image", "link": "https://127.0.0.1/a.jpg"},
+    ],
+)
+def test_rejects_invalid_media_combinations_before_provider(message: dict[str, object]) -> None:
+    session = _Session([])
+    with pytest.raises(WhatsAppApiError):
+        asyncio.run(WhatsAppApiClient(session, TOKEN).send_media_message(SENDER_ID, RECIPIENT, message))
+    assert session.requests == []
+
+
+def test_media_action_orders_approval_before_stored_input_and_provider() -> None:
+    events: list[str] = []
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_media_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"media_type": "sticker", "media_id": "123456789"},
+                ctx=_ActionContext(events),
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert events == ["approval", "stored-input", "provider"]

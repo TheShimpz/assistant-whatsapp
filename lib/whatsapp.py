@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Annotated, Any, NotRequired, TypedDict
-from urllib.parse import quote
+from ipaddress import ip_address
+from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from urllib.parse import quote, urlsplit
 
 import aiohttp
 
@@ -31,11 +32,28 @@ Recipient = Annotated[
 ]
 MessageText = Annotated[str, "WhatsApp text body.", {"minLength": 1, "maxLength": 4096}]
 MessageId = Annotated[str, "WhatsApp message id.", {"minLength": 7, "maxLength": 512, "pattern": r"^wamid\..+$"}]
+MediaId = Annotated[str, "Meta media object id.", {"minLength": 1, "maxLength": 512}]
+MediaLink = Annotated[
+    str,
+    "Public HTTPS media URL for Meta to fetch.",
+    {"minLength": 9, "maxLength": 2048, "pattern": r"^https://"},
+]
+MediaCaption = Annotated[str, "Media caption.", {"minLength": 1, "maxLength": 1024}]
+MediaFilename = Annotated[str, "Document filename.", {"minLength": 1, "maxLength": 240}]
 
 
 class TextMessage(TypedDict):
     body: MessageText
     preview_url: NotRequired[bool]
+    reply_to_message_id: NotRequired[MessageId]
+
+
+class MediaMessage(TypedDict):
+    media_type: Literal["audio", "document", "image", "sticker", "video"]
+    media_id: NotRequired[MediaId]
+    link: NotRequired[MediaLink]
+    caption: NotRequired[MediaCaption]
+    filename: NotRequired[MediaFilename]
     reply_to_message_id: NotRequired[MessageId]
 
 
@@ -67,16 +85,42 @@ class WhatsAppApiClient:
         sender = _phone_number_id(sender_phone_number_id)
         destination = _recipient(recipient)
         text = _text_message(message)
-        body = {
+        return await self._send_message(
+            sender,
+            destination,
+            "text",
+            {"preview_url": text.get("preview_url", False), "body": text["body"]},
+            text.get("reply_to_message_id"),
+        )
+
+    async def send_media_message(
+        self,
+        sender_phone_number_id: str,
+        recipient: str,
+        message: MediaMessage,
+    ) -> SendTextMessageResult:
+        sender = _phone_number_id(sender_phone_number_id)
+        destination = _recipient(recipient)
+        media_type, media, reply_to = _media_message(message)
+        return await self._send_message(sender, destination, media_type, media, reply_to)
+
+    async def _send_message(
+        self,
+        sender: str,
+        destination: str,
+        message_type: str,
+        content: dict[str, object],
+        reply_to_message_id: str | None,
+    ) -> SendTextMessageResult:
+        body: dict[str, object] = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": destination,
-            "type": "text",
-            "text": {"preview_url": text.get("preview_url", False), "body": text["body"]},
+            "type": message_type,
+            message_type: content,
         }
-        reply_to = text.get("reply_to_message_id")
-        if reply_to is not None:
-            body["context"] = {"message_id": reply_to}
+        if reply_to_message_id is not None:
+            body["context"] = {"message_id": reply_to_message_id}
         encoded = json.dumps(body, allow_nan=False, ensure_ascii=False, separators=(",", ":")).encode()
         if not 1 <= len(encoded) <= MAX_REQUEST_BYTES:
             raise WhatsAppApiError("WhatsApp request size is invalid")
@@ -200,7 +244,11 @@ def _recipient(value: object) -> str:
 
 
 def _message_text(value: object) -> str:
-    if not isinstance(value, str) or not 1 <= len(value) <= 4096 or value != value.strip():
+    return _bounded_message_text(value, 4096)
+
+
+def _bounded_message_text(value: object, maximum: int) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= maximum or value != value.strip():
         raise WhatsAppApiError("WhatsApp message is invalid")
     if any((ord(character) < 32 and character not in "\n\t") or ord(character) == 127 for character in value):
         raise WhatsAppApiError("WhatsApp message is invalid")
@@ -220,11 +268,84 @@ def _text_message(value: object) -> TextMessage:
     return result
 
 
+def _media_message(value: object) -> tuple[str, dict[str, object], str | None]:
+    message = _closed_object(
+        value,
+        required={"media_type"},
+        optional={"media_id", "link", "caption", "filename", "reply_to_message_id"},
+    )
+    media_type = message["media_type"]
+    if not isinstance(media_type, str) or media_type not in {"audio", "document", "image", "sticker", "video"}:
+        raise WhatsAppApiError("WhatsApp media type is invalid")
+    sources = [key for key in ("media_id", "link") if key in message]
+    if len(sources) != 1:
+        raise WhatsAppApiError("WhatsApp media source is invalid")
+    source = sources[0]
+    source_value = (
+        _public_text(message[source], 512) if source == "media_id" else _https_url(message[source])
+    )
+    media: dict[str, object] = {"id" if source == "media_id" else "link": source_value}
+    if "caption" in message:
+        if media_type not in {"document", "image", "video"}:
+            raise WhatsAppApiError("WhatsApp media caption is invalid")
+        media["caption"] = _bounded_message_text(message["caption"], 1024)
+    if "filename" in message:
+        if media_type != "document":
+            raise WhatsAppApiError("WhatsApp media filename is invalid")
+        media["filename"] = _public_text(message["filename"], 240)
+    reply_to = _message_id(message["reply_to_message_id"]) if "reply_to_message_id" in message else None
+    return media_type, media, reply_to
+
+
+def media_message_summary(value: object) -> str:
+    """Validate one media request and return a bounded approval summary."""
+    media_type, media, reply_to = _media_message(value)
+    source = "Meta media id" if "id" in media else "public HTTPS link"
+    reply = " as a reply" if reply_to is not None else ""
+    return f"{media_type} from {source}{reply}"
+
+
 def _message_id(value: object) -> str:
     message_id = _public_text(value, 512)
     if not message_id.startswith("wamid."):
         raise WhatsAppApiError("WhatsApp message id is invalid")
     return message_id
+
+
+def _https_url(value: object) -> str:
+    url = _public_text(value, 2048)
+    try:
+        parsed = urlsplit(url)
+        port = parsed.port
+    except ValueError:
+        raise WhatsAppApiError("WhatsApp media URL is invalid") from None
+    hostname = parsed.hostname
+    if (
+        parsed.scheme != "https"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or parsed.fragment
+        or hostname is None
+        or not _domain_name(hostname)
+    ):
+        raise WhatsAppApiError("WhatsApp media URL is invalid")
+    return url
+
+
+def _domain_name(hostname: str) -> bool:
+    if not hostname.isascii() or len(hostname) > 253 or "." not in hostname or hostname.endswith("."):
+        return False
+    try:
+        ip_address(hostname)
+    except ValueError:
+        pass
+    else:
+        return False
+    return all(
+        re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) is not None
+        for label in hostname.split(".")
+    )
 
 
 def _whatsapp_id(value: object) -> str:

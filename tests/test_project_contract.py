@@ -7,7 +7,8 @@ from pathlib import Path
 
 from shimpz.action import ActionMetadata, get_action_metadata
 
-from actions.send_text_message import run
+from actions.send_media_message import run as send_media_message
+from actions.send_text_message import run as send_text_message
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,12 +33,13 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
 
 
 def test_action_declares_exact_human_and_stored_input_contract() -> None:
-    assert inspect.iscoroutinefunction(run)
-    context = inspect.signature(run).parameters["ctx"]
-    assert context.kind is inspect.Parameter.KEYWORD_ONLY
-    assert context.default is inspect.Parameter.empty
-    metadata = get_action_metadata(run)
-    assert isinstance(metadata, ActionMetadata)
-    assert metadata.integrations == ()
-    assert metadata.stored_inputs == ("whatsapp-token",)
-    assert metadata.human_requests == ("approval", "input:password")
+    for body in (send_media_message, send_text_message):
+        assert inspect.iscoroutinefunction(body)
+        context = inspect.signature(body).parameters["ctx"]
+        assert context.kind is inspect.Parameter.KEYWORD_ONLY
+        assert context.default is inspect.Parameter.empty
+        metadata = get_action_metadata(body)
+        assert isinstance(metadata, ActionMetadata)
+        assert metadata.integrations == ()
+        assert metadata.stored_inputs == ("whatsapp-token",)
+        assert metadata.human_requests == ("approval", "input:password")
