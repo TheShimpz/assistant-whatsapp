@@ -1,7 +1,7 @@
 [shimpz]
 spec = 1
 id = "whatsapp"
-version = "0.2.0"
+version = "0.2.1"
 name = "WhatsApp"
 summary = "Automate reviewed WhatsApp Cloud API messages with a reusable Team-custodied token."
 creators = ["@shimpz"]

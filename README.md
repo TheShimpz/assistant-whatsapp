@@ -2,7 +2,7 @@
 
 An independently published Shimpz Assistant for reviewed outbound WhatsApp Cloud API automation.
 
-Version 0.2.0 provides ten bounded Actions for text, media, locations, contacts, approved templates, buttons and
+Version 0.2.1 provides ten bounded Actions for text, media, locations, contacts, approved templates, buttons and
 lists, products and catalogs, published Flows, reactions, read receipts, and typing indicators. Media can reference
 an existing Meta media id or a public HTTPS link; the Assistant never fetches a user-supplied URL itself.
 
