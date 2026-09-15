@@ -151,10 +151,10 @@ def _success() -> dict[str, object]:
     }
 
 
-def test_http_session_ignores_ambient_proxy_and_netrc_configuration() -> None:
+def test_http_session_honors_the_team_egress_proxy_environment() -> None:
     async def inspect_session() -> None:
         async with create_http_session() as session:
-            assert session.trust_env is False
+            assert session.trust_env is True
 
     asyncio.run(inspect_session())
 
