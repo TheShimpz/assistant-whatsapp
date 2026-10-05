@@ -12,11 +12,16 @@ without another token prompt. Team is the sole persistent custodian: the token d
 an environment variable, or Neuron.
 
 Every approval and token prompt is English `shimpz.text` catalog copy that Team shows in the person's interface
-language (ADR-0091); it requires SDK 0.5.2 and CLI 0.5.64 or later. Each approval names the exact sender phone-number id and recipient as typed parameters, plus the
-media type, counts, coordinates, template name and language, Flow id or name, or incoming message id when the value
-fits the catalog identifier alphabet and 128 characters. A value no parameter can show exactly, such as a reaction
-emoji, a free-text Flow name, or a longer template name, is never interpolated; the approval says what it covers
-instead.
+language (ADR-0091); it requires SDK 0.5.2 and CLI 0.5.64 or later. Each approval names the exact sender
+phone-number id and recipient as typed parameters, plus the media type, counts, coordinates, template name and
+language, Flow id or name, or incoming message id when the value fits the catalog identifier alphabet and 128
+characters. A value no parameter can show exactly, such as a reaction emoji, a free-text Flow name, a template name
+that is too long or starts with an underscore, or a message id outside that alphabet, is never interpolated; the
+approval says that it is not shown. A reaction approval never shows its target message.
+
+Every approval also ends with a request reference: a digest of the validated sender, recipient, and exact content
+input. The SDK fingerprints the approval's parameters and replays the approval only for an identical request, so an
+approval authorizes exactly the values it was granted for, shown or not, and any changed value asks again.
 
 ## First live test
 

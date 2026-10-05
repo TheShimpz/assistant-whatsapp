@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -11,8 +13,9 @@ import aiohttp
 import pytest
 from shimpz import Context, InputRequest, Text
 from shimpz._human import HumanRequestSuspension
-from shimpz._project import load_catalog_document
+from shimpz._project import AssistantProject, load_catalog_document
 from shimpz._reference import render_request
+from shimpz._runtime import ActionFailure, ActionInvocation, invoke_action
 from shimpz.context import ActionDeclaration
 
 from actions.mark_message_read import run as mark_message_read
@@ -36,7 +39,21 @@ from lib.whatsapp import (
 SENDER_ID = "123456789012345"
 RECIPIENT = "15555550123"
 TOKEN = "opaque-meta-access-token"
-CATALOG = load_catalog_document(Path(__file__).resolve().parents[1])["messages"]
+ROOT = Path(__file__).resolve().parents[1]
+CATALOG = load_catalog_document(ROOT)["messages"]
+OPERATION_ID = "0b1f6c1e-3d6a-4f7e-9a2b-5c8d7e6f1a20"
+
+
+_REFERENCE_SENTENCE = re.compile(
+    r" Anything not shown here is fixed by request reference [0-9a-f]{32}; a changed request needs a new approval\."
+)
+
+
+def _assert_bound_copy(description: object, shown: str) -> None:
+    """Assert the shown copy and that the description binds the request by its reference."""
+    assert isinstance(description, str)
+    assert description.startswith(shown)
+    assert _REFERENCE_SENTENCE.fullmatch(description.removeprefix(shown)) is not None
 
 
 class _Content:
@@ -233,8 +250,9 @@ def test_action_orders_approval_before_stored_input_and_provider() -> None:
 
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed text message from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed text message from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -465,8 +483,9 @@ def test_location_action_orders_approval_before_stored_input_and_provider() -> N
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed location at latitude 23.55052 south and longitude 46.633308 west from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed location at latitude 23.55052 south and longitude 46.633308 west from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -595,8 +614,9 @@ def test_reaction_action_orders_approval_before_stored_input_and_provider() -> N
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed emoji reaction to an incoming message from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed emoji reaction from Meta phone-number id 123456789012345 to 15555550123. The emoji and the incoming message it reacts to are not shown here.",
     )
 
 
@@ -667,8 +687,9 @@ def test_read_receipt_action_orders_approval_before_stored_input_and_provider() 
         )
     assert result["read"] is True
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Use Meta phone-number id 123456789012345 to mark message wamid.incoming as read and show a typing indicator.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Use Meta phone-number id 123456789012345 to mark message wamid.incoming as read and show a typing indicator.",
     )
 
 
@@ -686,8 +707,9 @@ def test_long_message_id_fits_the_approval_description() -> None:
         )
     assert result["read"] is True
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Use Meta phone-number id 123456789012345 to mark the requested incoming message as read.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Use Meta phone-number id 123456789012345 to mark one incoming message as read. Its message id is not shown here.",
     )
 
 
@@ -710,8 +732,9 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
         "language": {"code": "en_US"},
     }
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed approved template hello_world in en_US from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed approved template hello_world in en_US from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -730,8 +753,9 @@ def test_long_template_name_fits_the_approval_description() -> None:
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it is longer than 128 characters.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it is longer than 128 characters.",
     )
 
 
@@ -751,8 +775,9 @@ def test_underscore_template_name_states_why_it_is_not_shown() -> None:
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["template"]["name"] == "_hello"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it starts with an underscore.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it starts with an underscore.",
     )
 
 
@@ -776,8 +801,9 @@ def test_choice_action_orders_approval_before_stored_input_and_provider() -> Non
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "button"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed reply-button choice with 2 options from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed reply-button choice with 2 options from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -801,8 +827,9 @@ def test_catalog_action_orders_approval_before_stored_input_and_provider() -> No
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "product"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed single product from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed single product from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -829,8 +856,9 @@ def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "flow"
     assert events == ["approval", "stored-input", "provider"]
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed published Flow with id 987654321 from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed published Flow with id 987654321 from Meta phone-number id 123456789012345 to 15555550123.",
     )
 
 
@@ -857,6 +885,195 @@ def test_long_flow_name_fits_the_approval_description() -> None:
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
 
-    assert ctx.approvals[0]["description"] == (
-        'Send one reviewed published Flow, identified in the request by a value this approval cannot display, from Meta phone-number id 123456789012345 to 15555550123.'
+    _assert_bound_copy(
+        ctx.approvals[0]["description"],
+        "Send one reviewed published Flow from Meta phone-number id 123456789012345 to 15555550123. Its Flow name is not shown here.",
     )
+
+
+@functools.cache
+def _project() -> AssistantProject:
+    return AssistantProject.load(ROOT)
+
+
+def _invoke(action_id: str, inputs: dict[str, object], responses: list[dict[str, object]]) -> object:
+    invocation = ActionInvocation(
+        inputs=inputs,
+        integrations={},
+        stored_inputs={},
+        operation_id=OPERATION_ID,
+        responses=tuple(responses),
+    )
+    return asyncio.run(invoke_action(_project(), action_id, invocation))
+
+
+def _granted_transcript(action_id: str, inputs: dict[str, object]) -> list[dict[str, object]]:
+    """Answer the approval and the just-in-time token request exactly as Team replays them."""
+    with pytest.raises(HumanRequestSuspension) as approval:
+        _invoke(action_id, inputs, [])
+    assert approval.value.request["kind"] == "approval"
+    responses: list[dict[str, object]] = [
+        {"kind": "approval", "ordinal": 0, "fingerprint": approval.value.request["fingerprint"], "value": True}
+    ]
+    with pytest.raises(HumanRequestSuspension) as password:
+        _invoke(action_id, inputs, responses)
+    assert password.value.request["kind"] == "input:password"
+    assert password.value.request["stored_input"] == "whatsapp-token"
+    responses.append(
+        {"kind": "input:password", "ordinal": 1, "fingerprint": password.value.request["fingerprint"], "value": TOKEN}
+    )
+    return responses
+
+
+def _sends(sender: dict[str, object], recipient: dict[str, object] | None = None) -> dict[str, object]:
+    return {
+        "sender_phone_number_id": SENDER_ID,
+        **({"recipient": RECIPIENT} if recipient is None else recipient),
+        **sender,
+    }
+
+
+_FLOW = {
+    "flow_token": "appointment-42",
+    "flow_cta": "Schedule",
+    "flow_action": "navigate",
+    "screen": "APPOINTMENT",
+    "body": "Choose a time",
+}
+_UNSHOWN_MESSAGE_ID = "wamid.HBgLMTU1NTU1NTAxMjMVAgASGBQzQUY2+approved=="
+_OTHER_MESSAGE_ID = "wamid.HBgLMTU1NTU1NTAxMjMVAgASGBQzQUY2+different=="
+
+# Each case approves one request whose distinguishing value the approval copy cannot show, then changes only that
+# value. The approval response must not authorize the changed request.
+_REPLAY_CASES = [
+    pytest.param(
+        "set-message-reaction",
+        _sends({"reaction": {"message_id": "wamid.incoming", "emoji": "\u2705"}}),
+        _sends({"reaction": {"message_id": "wamid.incoming", "emoji": "\u274c"}}),
+        id="reaction-emoji",
+    ),
+    pytest.param(
+        "set-message-reaction",
+        _sends({"reaction": {"message_id": _UNSHOWN_MESSAGE_ID, "emoji": "\u2705"}}),
+        _sends({"reaction": {"message_id": _OTHER_MESSAGE_ID, "emoji": "\u2705"}}),
+        id="reaction-target",
+    ),
+    pytest.param(
+        "set-message-reaction",
+        _sends({"reaction": {"message_id": "wamid.incoming", "emoji": ""}}),
+        _sends({"reaction": {"message_id": "wamid.other", "emoji": ""}}),
+        id="reaction-removal-target",
+    ),
+    pytest.param(
+        "send-flow-message",
+        _sends({"message": {"flow_name": "Book an appointment", **_FLOW}}),
+        _sends({"message": {"flow_name": "Cancel every appointment", **_FLOW}}),
+        id="flow-name",
+    ),
+    pytest.param(
+        "send-template-message",
+        _sends({"message": {"name": "a" * 200, "language_code": "en_US"}}),
+        _sends({"message": {"name": "a" * 199 + "b", "language_code": "en_US"}}),
+        id="long-template-name",
+    ),
+    pytest.param(
+        "send-template-message",
+        _sends({"message": {"name": "_hello", "language_code": "en_US"}}),
+        _sends({"message": {"name": "_goodbye", "language_code": "en_US"}}),
+        id="underscore-template-name",
+    ),
+    pytest.param(
+        "mark-message-read",
+        {"sender_phone_number_id": SENDER_ID, "receipt": {"message_id": _UNSHOWN_MESSAGE_ID}},
+        {"sender_phone_number_id": SENDER_ID, "receipt": {"message_id": _OTHER_MESSAGE_ID}},
+        id="read-receipt-message-id",
+    ),
+    pytest.param(
+        "send-text-message",
+        _sends({"message": {"body": "See you at noon"}}),
+        _sends({"message": {"body": "Meeting cancelled"}}),
+        id="text-body",
+    ),
+]
+
+
+@pytest.mark.parametrize(("action_id", "approved", "changed"), _REPLAY_CASES)
+def test_replayed_approval_sends_exactly_the_approved_request(
+    action_id: str,
+    approved: dict[str, object],
+    changed: dict[str, object],
+) -> None:
+    del changed
+    responses = _granted_transcript(action_id, approved)
+    reply = {"success": True} if action_id == "mark-message-read" else _success()
+    session = _Session([_Response(reply)])
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = _invoke(action_id, approved, responses)
+
+    assert len(session.requests) == 1
+    assert TOKEN not in json.dumps(result)
+    body = json.loads(session.requests[0][1]["data"])
+    if action_id == "set-message-reaction":
+        assert body["reaction"] == approved["reaction"]
+    elif action_id == "send-flow-message":
+        assert body["interactive"]["action"]["parameters"]["flow_name"] == approved["message"]["flow_name"]
+    elif action_id == "send-template-message":
+        assert body["template"]["name"] == approved["message"]["name"]
+    elif action_id == "mark-message-read":
+        assert body["message_id"] == approved["receipt"]["message_id"]
+    else:
+        assert body["text"]["body"] == approved["message"]["body"]
+
+
+@pytest.mark.parametrize(("action_id", "approved", "changed"), _REPLAY_CASES)
+def test_approval_never_authorizes_a_changed_request(
+    action_id: str,
+    approved: dict[str, object],
+    changed: dict[str, object],
+) -> None:
+    responses = _granted_transcript(action_id, approved)
+    session = _Session([])
+    with patch("lib.runtime.create_http_session", return_value=session), pytest.raises(ActionFailure) as failed:
+        _invoke(action_id, changed, responses)
+
+    assert session.requests == []
+    assert TOKEN not in json.dumps(failed.value.envelope)
+    with pytest.raises(HumanRequestSuspension) as fresh:
+        _invoke(action_id, changed, [])
+    assert fresh.value.request["fingerprint"] != responses[0]["fingerprint"]
+
+
+@pytest.mark.parametrize(
+    ("action_id", "inputs", "shown"),
+    [
+        (
+            "set-message-reaction",
+            _sends({"reaction": {"message_id": "wamid.incoming", "emoji": ""}}),
+            "Remove one reaction from Meta phone-number id 123456789012345 to 15555550123. The incoming message it "
+            "reacted to is not shown here.",
+        ),
+        (
+            "send-flow-message",
+            _sends({"message": {"flow_id": "flow id with spaces", **_FLOW}}),
+            "Send one reviewed published Flow from Meta phone-number id 123456789012345 to 15555550123. Its Flow id "
+            "is not shown here.",
+        ),
+        (
+            "mark-message-read",
+            {
+                "sender_phone_number_id": SENDER_ID,
+                "receipt": {"message_id": _UNSHOWN_MESSAGE_ID, "typing_indicator": True},
+            },
+            "Use Meta phone-number id 123456789012345 to mark one incoming message as read and show a typing "
+            "indicator. Its message id is not shown here.",
+        ),
+    ],
+)
+def test_approval_states_each_identifying_value_it_does_not_show(
+    action_id: str,
+    inputs: dict[str, object],
+    shown: str,
+) -> None:
+    with pytest.raises(HumanRequestSuspension) as suspended:
+        _invoke(action_id, inputs, [])
+    _assert_bound_copy(render_request(suspended.value.request, CATALOG)["description"], shown)
