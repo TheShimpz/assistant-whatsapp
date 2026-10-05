@@ -2,7 +2,7 @@
 
 An independently published Shimpz Assistant for reviewed outbound WhatsApp Cloud API automation.
 
-Version 0.2.1 provides ten bounded Actions for text, media, locations, contacts, approved templates, buttons and
+Version 0.3.0 provides ten bounded Actions for text, media, locations, contacts, approved templates, buttons and
 lists, products and catalogs, published Flows, reactions, read receipts, and typing indicators. Media can reference
 an existing Meta media id or a public HTTPS link; the Assistant never fetches a user-supplied URL itself.
 
@@ -12,7 +12,7 @@ without another token prompt. Team is the sole persistent custodian: the token d
 an environment variable, or Neuron.
 
 Every approval and token prompt is English `shimpz.text` catalog copy that Team shows in the person's interface
-language (ADR-0091). Each approval names the exact sender phone-number id and recipient as typed parameters, plus the
+language (ADR-0091); it requires SDK 0.5.2 and CLI 0.5.64 or later. Each approval names the exact sender phone-number id and recipient as typed parameters, plus the
 media type, counts, coordinates, template name and language, Flow id or name, or incoming message id when the value
 fits the catalog identifier alphabet and 128 characters. A value no parameter can show exactly, such as a reaction
 emoji, a free-text Flow name, or a longer template name, is never interpolated; the approval says what it covers
