@@ -1,15 +1,10 @@
 """Send one reviewed WhatsApp media message."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
+from lib.approvals import media_approval
 from lib.runtime import approved_whatsapp_client
-from lib.whatsapp import (
-    MediaMessage,
-    PhoneNumberId,
-    Recipient,
-    SendMessageResult,
-    media_message_summary,
-)
+from lib.whatsapp import MediaMessage, PhoneNumberId, Recipient, SendMessageResult
 
 
 @action(
@@ -23,12 +18,9 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    summary = media_message_summary(message)
     async with approved_whatsapp_client(
         ctx,
-        title="Send this WhatsApp media message",
-        description=(
-            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
-        ),
+        title=text("Send this WhatsApp media message", max_length=80),
+        description=media_approval(sender_phone_number_id, recipient, message),
     ) as client:
         return await client.send_media_message(sender_phone_number_id, recipient, message)

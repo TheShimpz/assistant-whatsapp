@@ -11,7 +11,6 @@ from lib.whatsapp import (
     _https_url,
     _message_id,
     _public_text,
-    approval_identifier,
 )
 
 BodyText = Annotated[str, "Interactive message body.", {"minLength": 1, "maxLength": 1024}]
@@ -119,15 +118,6 @@ def build_choice_message(value: object) -> tuple[dict[str, object], str | None]:
     return result, reply_to
 
 
-def choice_message_summary(interactive: dict[str, object], reply_to: str | None) -> str:
-    """Return a bounded approval summary for one built choice message."""
-    action = interactive["action"]
-    count = len(action["buttons"]) if interactive["type"] == "button" else sum(
-        len(section["rows"]) for section in action["sections"]
-    )
-    reply = " as a reply" if reply_to is not None else ""
-    return f"{interactive['type']} choice with {count} options{reply}"
-
 
 def build_commerce_message(value: object) -> dict[str, object]:
     """Build a single-product, multi-product, or catalog interactive object."""
@@ -153,13 +143,6 @@ def build_commerce_message(value: object) -> dict[str, object]:
         return _product_list(message)
     return _catalog(message)
 
-
-def commerce_message_summary(interactive: dict[str, object]) -> str:
-    """Return a bounded approval summary for one built commerce message."""
-    if interactive["type"] == "product_list":
-        count = sum(len(section["product_items"]) for section in interactive["action"]["sections"])
-        return f"product list with {count} products"
-    return str(interactive["type"]).replace("_", " ")
 
 
 def build_flow_message(value: object) -> dict[str, object]:
@@ -202,15 +185,6 @@ def build_flow_message(value: object) -> dict[str, object]:
         result["footer"] = {"text": _bounded_message_text(message["footer"], 60)}
     return result
 
-
-def flow_message_summary(interactive: dict[str, object]) -> str:
-    """Return a bounded approval summary for one built Flow message."""
-    parameters = interactive["action"]["parameters"]
-    identity = "flow_id" if "flow_id" in parameters else "flow_name"
-    identifier = parameters[identity]
-    if not isinstance(identifier, str):
-        raise WhatsAppApiError("WhatsApp Flow identity is invalid")
-    return f"published Flow {approval_identifier(identifier)}"
 
 
 def _flow_data(value: object) -> dict[str, str]:

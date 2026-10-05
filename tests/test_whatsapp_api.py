@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import aiohttp
 import pytest
-from shimpz import Context, InputRequest
+from shimpz import Context, InputRequest, Text
 from shimpz._human import HumanRequestSuspension
+from shimpz._project import load_catalog_document
+from shimpz._reference import render_request
+from shimpz.context import ActionDeclaration
 
 from actions.mark_message_read import run as mark_message_read
 from actions.send_catalog_message import run as send_catalog_message
@@ -31,6 +36,7 @@ from lib.whatsapp import (
 SENDER_ID = "123456789012345"
 RECIPIENT = "15555550123"
 TOKEN = "opaque-meta-access-token"
+CATALOG = load_catalog_document(Path(__file__).resolve().parents[1])["messages"]
 
 
 class _Content:
@@ -86,24 +92,36 @@ class _StoredInputRejected(RuntimeError):
 
 
 class _ActionContext:
+    """Route every human request through the SDK and record its English rendering."""
+
     def __init__(self, events: list[str]) -> None:
         self.events = events
+        self.approvals: list[dict[str, object]] = []
 
-    def request_approval(self, *, title: str, description: str) -> None:
-        assert "WhatsApp" in title
-        assert TOKEN not in description
-        assert len(description) <= 500
+    @staticmethod
+    def _suspend(request: Callable[[Context], object]) -> dict[str, object]:
+        sdk_context = Context(
+            {},
+            ActionDeclaration(
+                human_requests=["approval", "input:password"],
+                stored_inputs=["whatsapp-token"],
+                messages=CATALOG,
+            ),
+        )
+        with pytest.raises(HumanRequestSuspension) as suspended:
+            request(sdk_context)
+        return render_request(suspended.value.request, CATALOG)
+
+    def request_approval(self, *, title: Text, description: Text) -> None:
+        rendered = self._suspend(lambda sdk: sdk.request_approval(title=title, description=description))
+        assert rendered["kind"] == "approval"
+        assert "WhatsApp" in rendered["title"]
+        assert TOKEN not in rendered["description"]
+        self.approvals.append(rendered)
         self.events.append("approval")
 
     def request_input(self, request: InputRequest) -> str:
-        sdk_context = Context(
-            {},
-            human_requests=["input:password"],
-            stored_input_ids=["whatsapp-token"],
-        )
-        with pytest.raises(HumanRequestSuspension) as suspended:
-            sdk_context.request_input(request)
-        frame = suspended.value.request
+        frame = self._suspend(lambda sdk: sdk.request_input(request))
         assert set(frame) == {
             "kind",
             "ordinal",
@@ -132,8 +150,6 @@ class _ActionContext:
         }
         assert isinstance(frame["fingerprint"], str)
         assert len(frame["fingerprint"]) == 64
-        assert TOKEN not in request.title
-        assert TOKEN not in request.description
         self.events.append("stored-input")
         return TOKEN
 
@@ -209,13 +225,17 @@ def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -
 
 def test_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
 
     with patch("lib.runtime.create_http_session", return_value=session):
-        result = asyncio.run(send_text_message(SENDER_ID, RECIPIENT, {"body": "Hello"}, ctx=_ActionContext(events)))
+        result = asyncio.run(send_text_message(SENDER_ID, RECIPIENT, {"body": "Hello"}, ctx=ctx))
 
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed text message from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_text_action_rejects_invalid_content_before_approval_and_stored_input() -> None:
@@ -432,6 +452,7 @@ def test_rejects_invalid_locations_before_provider(location: dict[str, object]) 
 
 def test_location_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -439,11 +460,14 @@ def test_location_action_orders_approval_before_stored_input_and_provider() -> N
                 SENDER_ID,
                 RECIPIENT,
                 {"latitude": -23.55052, "longitude": -46.633308},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed location at latitude 23.55052 south and longitude 46.633308 west from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def _complete_contact() -> dict[str, object]:
@@ -558,6 +582,7 @@ def test_rejects_invalid_reactions_before_provider(emoji: str) -> None:
 
 def test_reaction_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -565,11 +590,14 @@ def test_reaction_action_orders_approval_before_stored_input_and_provider() -> N
                 SENDER_ID,
                 RECIPIENT,
                 {"message_id": "wamid.target", "emoji": "✅"},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed emoji reaction to an incoming message from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 @pytest.mark.parametrize(
@@ -627,36 +655,45 @@ def test_rejects_invalid_read_receipt_results_and_inputs() -> None:
 
 def test_read_receipt_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response({"success": True})], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
             mark_message_read(
                 SENDER_ID,
                 {"message_id": "wamid.incoming", "typing_indicator": True},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["read"] is True
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Use Meta phone-number id 123456789012345 to mark message wamid.incoming as read and show a typing indicator.'
+    )
 
 
 def test_long_message_id_fits_the_approval_description() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response({"success": True})], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
             mark_message_read(
                 SENDER_ID,
                 {"message_id": f"wamid.{('a' * 506)}"},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["read"] is True
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Use Meta phone-number id 123456789012345 to mark the requested incoming message as read.'
+    )
 
 
 def test_template_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -664,7 +701,7 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
                 SENDER_ID,
                 RECIPIENT,
                 {"name": "hello_world", "language_code": "en_US"},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
@@ -673,10 +710,14 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
         "language": {"code": "en_US"},
     }
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed approved template hello_world in en_US from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_long_template_name_fits_the_approval_description() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -684,15 +725,19 @@ def test_long_template_name_fits_the_approval_description() -> None:
                 SENDER_ID,
                 RECIPIENT,
                 {"name": "a" * 512, "language_code": "en_US"},
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed approved template whose name is longer than 128 characters in en_US from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_choice_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -704,16 +749,20 @@ def test_choice_action_orders_approval_before_stored_input_and_provider() -> Non
                     "body": "Choose one",
                     "buttons": [{"id": "yes", "title": "Yes"}, {"id": "no", "title": "No"}],
                 },
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "button"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed reply-button choice with 2 options from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_catalog_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -725,16 +774,20 @@ def test_catalog_action_orders_approval_before_stored_input_and_provider() -> No
                     "catalog_id": "367025965434465",
                     "product_retailer_id": "sku-1",
                 },
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "product"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed single product from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -749,16 +802,20 @@ def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
                     "screen": "APPOINTMENT",
                     "body": "Choose a time",
                 },
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert json.loads(session.requests[0][1]["data"])["interactive"]["type"] == "flow"
     assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed published Flow with id 987654321 from Meta phone-number id 123456789012345 to 15555550123.'
+    )
 
 
 def test_long_flow_name_fits_the_approval_description() -> None:
     events: list[str] = []
+    ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
     with patch("lib.runtime.create_http_session", return_value=session):
         result = asyncio.run(
@@ -773,8 +830,12 @@ def test_long_flow_name_fits_the_approval_description() -> None:
                     "screen": "APPOINTMENT",
                     "body": "Choose a time",
                 },
-                ctx=_ActionContext(events),
+                ctx=ctx,
             )
         )
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
+
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed published Flow, identified in the request by a value this approval cannot display, from Meta phone-number id 123456789012345 to 15555550123.'
+    )

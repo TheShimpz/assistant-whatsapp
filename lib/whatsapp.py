@@ -433,13 +433,6 @@ def _text_message(value: object) -> TextMessage:
     return result
 
 
-def text_message_summary(value: object) -> str:
-    """Validate one text request and return a bounded approval summary."""
-    message = _text_message(value)
-    preview = " with link preview" if message.get("preview_url", False) else ""
-    reply = " as a reply" if "reply_to_message_id" in message else ""
-    return f"text message{preview}{reply}"
-
 
 def _media_message(value: object) -> tuple[str, dict[str, object], str | None]:
     message = _closed_object(
@@ -470,13 +463,6 @@ def _media_message(value: object) -> tuple[str, dict[str, object], str | None]:
     return media_type, media, reply_to
 
 
-def media_message_summary(value: object) -> str:
-    """Validate one media request and return a bounded approval summary."""
-    media_type, media, reply_to = _media_message(value)
-    source = "Meta media id" if "id" in media else "public HTTPS link"
-    reply = " as a reply" if reply_to is not None else ""
-    return f"{media_type} from {source}{reply}"
-
 
 def _location_message(value: object) -> tuple[dict[str, object], str | None]:
     message = _closed_object(
@@ -495,12 +481,6 @@ def _location_message(value: object) -> tuple[dict[str, object], str | None]:
     return location, reply_to
 
 
-def location_message_summary(value: object) -> str:
-    """Validate one location request and return a bounded approval summary."""
-    location, reply_to = _location_message(value)
-    reply = " as a reply" if reply_to is not None else ""
-    return f"location at {location['latitude']}, {location['longitude']}{reply}"
-
 
 def _coordinate(value: object, *, minimum: float, maximum: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -518,13 +498,6 @@ def _contacts_message(value: object) -> tuple[list[dict[str, object]], str | Non
     reply_to = _message_id(message["reply_to_message_id"]) if "reply_to_message_id" in message else None
     return result, reply_to
 
-
-def contacts_message_summary(value: object) -> str:
-    """Validate one contacts request and return a bounded approval summary."""
-    contacts, reply_to = _contacts_message(value)
-    reply = " as a reply" if reply_to is not None else ""
-    noun = "contact" if len(contacts) == 1 else "contacts"
-    return f"{len(contacts)} {noun}{reply}"
 
 
 def _contact(value: object) -> dict[str, object]:
@@ -672,12 +645,6 @@ def _reaction_message(value: object) -> dict[str, object]:
     return {"message_id": _message_id(reaction["message_id"]), "emoji": emoji}
 
 
-def reaction_message_summary(value: object) -> str:
-    """Validate one reaction request and return a bounded approval summary."""
-    reaction = _reaction_message(value)
-    emoji = reaction["emoji"]
-    return f"reaction {emoji}" if emoji else "reaction removal"
-
 
 def _read_receipt(value: object) -> tuple[str, bool]:
     receipt = _closed_object(value, required={"message_id"}, optional={"typing_indicator"})
@@ -687,18 +654,6 @@ def _read_receipt(value: object) -> tuple[str, bool]:
     return _message_id(receipt["message_id"]), typing_indicator
 
 
-def read_receipt_summary(value: object) -> str:
-    """Validate one read receipt and return a bounded approval summary."""
-    message_id, typing_indicator = _read_receipt(value)
-    typing = " and show a typing indicator" if typing_indicator else ""
-    return f"mark message {approval_identifier(message_id)} as read{typing}"
-
-
-def approval_identifier(value: str) -> str:
-    """Keep identifiers recognizable while respecting the approval description bound."""
-    if len(value) <= 128:
-        return value
-    return f"{value[:80]}…{value[-32:]} (truncated)"
 
 
 def _valid_reaction_emoji(value: str) -> bool:

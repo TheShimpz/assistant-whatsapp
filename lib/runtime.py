@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from shimpz import Context, InputRequest
+from shimpz import Context, InputRequest, Text, text
 
 from lib.whatsapp import WhatsAppApiClient, WhatsAppTokenRejected, create_http_session
 
@@ -14,17 +14,17 @@ from lib.whatsapp import WhatsAppApiClient, WhatsAppTokenRejected, create_http_s
 async def approved_whatsapp_client(
     ctx: Context,
     *,
-    title: str,
-    description: str,
+    title: Text,
+    description: Text,
 ) -> AsyncIterator[WhatsAppApiClient]:
     """Approve one effect, then expose a token-bound client for that effect."""
     ctx.request_approval(title=title, description=description)
     token = ctx.request_input(
         InputRequest(
             kind="password",
-            title="WhatsApp access token",
-            description="Enter the Meta access token used by this WhatsApp Action.",
-            label="Meta access token",
+            title=text("WhatsApp access token"),
+            description=text("Enter the Meta access token used by this WhatsApp Action."),
+            label=text("Meta access token"),
             min_length=1,
             max_length=1024,
             stored_input="whatsapp-token",

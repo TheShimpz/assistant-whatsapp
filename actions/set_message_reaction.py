@@ -1,15 +1,10 @@
 """Add or remove one reviewed WhatsApp message reaction."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
+from lib.approvals import reaction_approval
 from lib.runtime import approved_whatsapp_client
-from lib.whatsapp import (
-    PhoneNumberId,
-    ReactionMessage,
-    Recipient,
-    SendMessageResult,
-    reaction_message_summary,
-)
+from lib.whatsapp import PhoneNumberId, ReactionMessage, Recipient, SendMessageResult
 
 
 @action(
@@ -23,12 +18,9 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    summary = reaction_message_summary(reaction)
     async with approved_whatsapp_client(
         ctx,
-        title="Change this WhatsApp reaction",
-        description=(
-            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
-        ),
+        title=text("Change this WhatsApp reaction", max_length=80),
+        description=reaction_approval(sender_phone_number_id, recipient, reaction),
     ) as client:
         return await client.set_message_reaction(sender_phone_number_id, recipient, reaction)

@@ -29,6 +29,7 @@ from lib import interactives, templates, whatsapp
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_MODULES = (whatsapp, templates, interactives)
+OPERATION_ID = "0b1f6c1e-3d6a-4f7e-9a2b-5c8d7e6f1a20"
 
 
 def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
@@ -312,7 +313,13 @@ def test_minimal_action_forms_reach_approval(
             invoke_action(
                 assistant_project,
                 action_id,
-                ActionInvocation(inputs=inputs, integrations={}, stored_inputs={}, responses=()),
+                ActionInvocation(
+                    inputs=inputs,
+                    integrations={},
+                    stored_inputs={},
+                    operation_id=OPERATION_ID,
+                    responses=(),
+                ),
             )
         )
 

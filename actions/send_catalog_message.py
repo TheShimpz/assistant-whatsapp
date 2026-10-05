@@ -1,8 +1,9 @@
 """Send one reviewed WhatsApp product or catalog message."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
-from lib.interactives import CommerceMessage, build_commerce_message, commerce_message_summary
+from lib.approvals import commerce_approval
+from lib.interactives import CommerceMessage
 from lib.runtime import approved_whatsapp_client
 from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
 
@@ -18,13 +19,10 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    interactive = build_commerce_message(message)
-    summary = commerce_message_summary(interactive)
+    interactive, description = commerce_approval(sender_phone_number_id, recipient, message)
     async with approved_whatsapp_client(
         ctx,
-        title="Send this WhatsApp catalog message",
-        description=(
-            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
-        ),
+        title=text("Send this WhatsApp catalog message", max_length=80),
+        description=description,
     ) as client:
         return await client.send_interactive_message(sender_phone_number_id, recipient, interactive)

@@ -1,15 +1,10 @@
 """Send one reviewed WhatsApp text message."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
+from lib.approvals import text_approval
 from lib.runtime import approved_whatsapp_client
-from lib.whatsapp import (
-    PhoneNumberId,
-    Recipient,
-    SendMessageResult,
-    TextMessage,
-    text_message_summary,
-)
+from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult, TextMessage
 
 
 @action(
@@ -23,13 +18,9 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    summary = text_message_summary(message)
     async with approved_whatsapp_client(
         ctx,
-        title="Send this WhatsApp message",
-        description=(
-            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} "
-            f"to {recipient}."
-        ),
+        title=text("Send this WhatsApp message", max_length=80),
+        description=text_approval(sender_phone_number_id, recipient, message),
     ) as client:
         return await client.send_text_message(sender_phone_number_id, recipient, message)

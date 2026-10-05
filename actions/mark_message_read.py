@@ -1,9 +1,10 @@
 """Mark one reviewed incoming WhatsApp message as read."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
+from lib.approvals import read_receipt_approval
 from lib.runtime import approved_whatsapp_client
-from lib.whatsapp import PhoneNumberId, ReadReceipt, ReadReceiptResult, read_receipt_summary
+from lib.whatsapp import PhoneNumberId, ReadReceipt, ReadReceiptResult
 
 
 @action(
@@ -16,10 +17,9 @@ async def run(
     *,
     ctx: Context,
 ) -> ReadReceiptResult:
-    summary = read_receipt_summary(receipt)
     async with approved_whatsapp_client(
         ctx,
-        title="Update this WhatsApp message status",
-        description=f"Use Meta phone-number id {sender_phone_number_id} to {summary}.",
+        title=text("Update this WhatsApp message status", max_length=80),
+        description=read_receipt_approval(sender_phone_number_id, receipt),
     ) as client:
         return await client.mark_message_read(sender_phone_number_id, receipt)

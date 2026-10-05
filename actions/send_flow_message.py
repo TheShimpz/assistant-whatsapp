@@ -1,8 +1,9 @@
 """Send one reviewed published WhatsApp Flow message."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
-from lib.interactives import FlowMessage, build_flow_message, flow_message_summary
+from lib.approvals import flow_approval
+from lib.interactives import FlowMessage
 from lib.runtime import approved_whatsapp_client
 from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
 
@@ -18,13 +19,10 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    interactive = build_flow_message(message)
-    summary = flow_message_summary(interactive)
+    interactive, description = flow_approval(sender_phone_number_id, recipient, message)
     async with approved_whatsapp_client(
         ctx,
-        title="Send this WhatsApp Flow",
-        description=(
-            f"Send one reviewed {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
-        ),
+        title=text("Send this WhatsApp Flow", max_length=80),
+        description=description,
     ) as client:
         return await client.send_interactive_message(sender_phone_number_id, recipient, interactive)

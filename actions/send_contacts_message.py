@@ -1,15 +1,10 @@
 """Send reviewed WhatsApp contact cards."""
 
-from shimpz import Context, action
+from shimpz import Context, action, text
 
+from lib.approvals import contacts_approval
 from lib.runtime import approved_whatsapp_client
-from lib.whatsapp import (
-    ContactsMessage,
-    PhoneNumberId,
-    Recipient,
-    SendMessageResult,
-    contacts_message_summary,
-)
+from lib.whatsapp import ContactsMessage, PhoneNumberId, Recipient, SendMessageResult
 
 
 @action(
@@ -23,12 +18,9 @@ async def run(
     *,
     ctx: Context,
 ) -> SendMessageResult:
-    summary = contacts_message_summary(message)
     async with approved_whatsapp_client(
         ctx,
-        title="Send these WhatsApp contacts",
-        description=(
-            f"Send {summary} from Meta phone-number id {sender_phone_number_id} to {recipient}."
-        ),
+        title=text("Send these WhatsApp contacts", max_length=80),
+        description=contacts_approval(sender_phone_number_id, recipient, message),
     ) as client:
         return await client.send_contacts_message(sender_phone_number_id, recipient, message)

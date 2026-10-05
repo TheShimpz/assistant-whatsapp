@@ -11,6 +11,13 @@ Every externally visible effect requires explicit human approval. The Meta acces
 without another token prompt. Team is the sole persistent custodian: the token does not belong in chat, the repo,
 an environment variable, or Neuron.
 
+Every approval and token prompt is English `shimpz.text` catalog copy that Team shows in the person's interface
+language (ADR-0091). Each approval names the exact sender phone-number id and recipient as typed parameters, plus the
+media type, counts, coordinates, template name and language, Flow id or name, or incoming message id when the value
+fits the catalog identifier alphabet and 128 characters. A value no parameter can show exactly, such as a reaction
+emoji, a free-text Flow name, or a longer template name, is never interpolated; the approval says what it covers
+instead.
+
 ## First live test
 
 Use a Meta test sender, one controlled and consenting recipient, and one effect per Team turn. For free-form messages,
