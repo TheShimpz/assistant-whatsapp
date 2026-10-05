@@ -109,8 +109,8 @@ def media_approval(sender: str, recipient: str, value: object) -> Text:
     if "id" in media:
         if reply_to is not None:
             return text(
-                "Send one reviewed {media_type} media message by Meta media id as a reply from Meta phone-number "
-                "id {sender} to {recipient}."
+                "Send one reviewed media message of type {media_type} by Meta media id as a reply from Meta "
+                "phone-number id {sender} to {recipient}."
                 " Anything not shown here is fixed by request reference {reference}; a changed request "
                 "needs a new approval.",
                 max_length=500,
@@ -120,8 +120,8 @@ def media_approval(sender: str, recipient: str, value: object) -> Text:
                 reference=identifier(reference, max_length=32),
             )
         return text(
-            "Send one reviewed {media_type} media message by Meta media id from Meta phone-number id {sender} to "
-            "{recipient}."
+            "Send one reviewed media message of type {media_type} by Meta media id from Meta phone-number id "
+            "{sender} to {recipient}."
             " Anything not shown here is fixed by request reference {reference}; a changed request "
             "needs a new approval.",
             max_length=500,
@@ -132,8 +132,8 @@ def media_approval(sender: str, recipient: str, value: object) -> Text:
         )
     if reply_to is not None:
         return text(
-            "Send one reviewed {media_type} media message by public HTTPS link as a reply from Meta phone-number "
-            "id {sender} to {recipient}."
+            "Send one reviewed media message of type {media_type} by public HTTPS link as a reply from Meta "
+            "phone-number id {sender} to {recipient}."
             " Anything not shown here is fixed by request reference {reference}; a changed request "
             "needs a new approval.",
             max_length=500,
@@ -143,8 +143,8 @@ def media_approval(sender: str, recipient: str, value: object) -> Text:
             reference=identifier(reference, max_length=32),
         )
     return text(
-        "Send one reviewed {media_type} media message by public HTTPS link from Meta phone-number id {sender} to "
-        "{recipient}."
+        "Send one reviewed media message of type {media_type} by public HTTPS link from Meta phone-number id "
+        "{sender} to {recipient}."
         " Anything not shown here is fixed by request reference {reference}; a changed request "
         "needs a new approval.",
         max_length=500,
