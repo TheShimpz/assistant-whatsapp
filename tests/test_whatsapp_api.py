@@ -731,7 +731,28 @@ def test_long_template_name_fits_the_approval_description() -> None:
     assert result["message_id"] == "wamid.message-id"
     assert events == ["approval", "stored-input", "provider"]
     assert ctx.approvals[0]["description"] == (
-        'Send one reviewed approved template whose name is longer than 128 characters in en_US from Meta phone-number id 123456789012345 to 15555550123.'
+        'Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it is longer than 128 characters.'
+    )
+
+
+def test_underscore_template_name_states_why_it_is_not_shown() -> None:
+    events: list[str] = []
+    ctx = _ActionContext(events)
+    session = _Session([_Response(_success())], events)
+    with patch("lib.runtime.create_http_session", return_value=session):
+        result = asyncio.run(
+            send_template_message(
+                SENDER_ID,
+                RECIPIENT,
+                {"name": "_hello", "language_code": "en_US"},
+                ctx=ctx,
+            )
+        )
+    assert result["message_id"] == "wamid.message-id"
+    assert json.loads(session.requests[0][1]["data"])["template"]["name"] == "_hello"
+    assert events == ["approval", "stored-input", "provider"]
+    assert ctx.approvals[0]["description"] == (
+        'Send one reviewed approved template in en_US from Meta phone-number id 123456789012345 to 15555550123. Its name is not shown here because it starts with an underscore.'
     )
 
 

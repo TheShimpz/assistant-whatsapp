@@ -13,6 +13,7 @@ from shimpz import Text, identifier, integer, text
 from lib.interactives import build_choice_message, build_commerce_message, build_flow_message
 from lib.templates import build_template_message
 from lib.whatsapp import (
+    WhatsAppApiError,
     _contacts_message,
     _location_message,
     _media_message,
@@ -253,14 +254,26 @@ def template_approval(sender: str, recipient: str, value: object) -> tuple[dict[
             sender=identifier(sender, max_length=32),
             recipient=identifier(recipient, max_length=15),
         )
-    return template, text(
-        "Send one reviewed approved template whose name is longer than 128 characters in {language} from Meta "
-        "phone-number id {sender} to {recipient}.",
-        max_length=500,
-        language=identifier(language, max_length=6),
-        sender=identifier(sender, max_length=32),
-        recipient=identifier(recipient, max_length=15),
-    )
+    if len(name) > 128:
+        return template, text(
+            "Send one reviewed approved template in {language} from Meta phone-number id {sender} to {recipient}. "
+            "Its name is not shown here because it is longer than 128 characters.",
+            max_length=500,
+            language=identifier(language, max_length=6),
+            sender=identifier(sender, max_length=32),
+            recipient=identifier(recipient, max_length=15),
+        )
+    # Template names use [a-z0-9_]; within the length bound only a leading underscore leaves the identifier alphabet.
+    if name.startswith("_"):
+        return template, text(
+            "Send one reviewed approved template in {language} from Meta phone-number id {sender} to {recipient}. "
+            "Its name is not shown here because it starts with an underscore.",
+            max_length=500,
+            language=identifier(language, max_length=6),
+            sender=identifier(sender, max_length=32),
+            recipient=identifier(recipient, max_length=15),
+        )
+    raise WhatsAppApiError("WhatsApp template name cannot be described for approval")
 
 
 def choice_approval(sender: str, recipient: str, value: object) -> tuple[dict[str, object], str | None, Text]:
