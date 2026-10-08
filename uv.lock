@@ -83,7 +83,7 @@ wheels = [
 
 [[package]]
 name = "assistant-whatsapp"
-version = "0.3.0"
+version = "0.3.1"
 source = { virtual = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -99,7 +99,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = "==3.14.1" },
-    { name = "shimpz", specifier = "==0.5.2" },
+    { name = "shimpz", specifier = "==0.6.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -343,15 +343,15 @@ wheels = [
 
 [[package]]
 name = "shimpz"
-version = "0.5.2"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/e7/7c9a7d3432adc9deed22df99b919fcdb1c701b7abf6f34e112b247ec9feb/shimpz-0.5.2.tar.gz", hash = "sha256:671494224054141c6de0cff1d20c5bf526c632b0d245da89578b543459bd7099", size = 195677, upload-time = "2026-10-04T07:33:18.087Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/43/2ec564b10bcda85283f90537139733df27aedb72e8b91fb7a9f18942a83b/shimpz-0.6.0.tar.gz", hash = "sha256:28c1fb816cfc1a6811aa300d9c546141f42c5b0f6736cabbdf72d6c34f9ca8b6", size = 197811, upload-time = "2026-10-08T14:38:15.852Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b8/e1/a361fc70e231a81b0232c8c4f78305d9279a9161c69f2ece3ff1fbc066bf/shimpz-0.5.2-cp314-abi3-macosx_10_12_x86_64.whl", hash = "sha256:be093a483683bdc31be69c36d5e48e0e398a83878fc8a27e06d200f156e98736", size = 1122798, upload-time = "2026-10-04T07:33:10.083Z" },
-    { url = "https://files.pythonhosted.org/packages/d3/b1/1d2da5943deda58984d03bedfc92124474a0519ee76a7c550d433c076666/shimpz-0.5.2-cp314-abi3-macosx_11_0_arm64.whl", hash = "sha256:173aeaa309d1679f4bb85feb1318ba60318ec032d7dc2b34c6947001a03c41ef", size = 1060051, upload-time = "2026-10-04T07:33:11.618Z" },
-    { url = "https://files.pythonhosted.org/packages/01/4e/3fecd19e90f437be0dcc6fdad76f8f2e7196f0bb1e803f2438a35d1519fd/shimpz-0.5.2-cp314-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:e1230c80a5547664f2d7839eb2247008cafb7e7031e72b8de9608b062b544f47", size = 1135743, upload-time = "2026-10-04T07:33:13.106Z" },
-    { url = "https://files.pythonhosted.org/packages/25/ff/6e95ba06c8b614cf2a953700d2d597d7a019a321232f1821aedd50389905/shimpz-0.5.2-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:aec882e04cd3b909c90363eeee5d71c522a53b4e4f3bd152714dfeef9c543d11", size = 1216792, upload-time = "2026-10-04T07:33:14.642Z" },
-    { url = "https://files.pythonhosted.org/packages/17/c0/453659a6bb4f82c3d96af089ee134c9a331775d14df294128cff04b5f309/shimpz-0.5.2-cp314-abi3-win_amd64.whl", hash = "sha256:acc0ff3481babfddd3816e3852005ac8e860f1c87ba72671e55f62494e091f87", size = 1105216, upload-time = "2026-10-04T07:33:16.536Z" },
+    { url = "https://files.pythonhosted.org/packages/2e/49/8528911ba6492c680b34f6546f88d7c7a5c268720512622fd0d6b54f2cac/shimpz-0.6.0-cp314-abi3-macosx_10_12_x86_64.whl", hash = "sha256:6356aafbd414a919ba213a352284d1c2f666575e93f726a028489d1ae471d453", size = 1124184, upload-time = "2026-10-08T14:38:07.758Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/12/850d33e746b553f90946616da293263f01e4a6db937089bd4234a075bee9/shimpz-0.6.0-cp314-abi3-macosx_11_0_arm64.whl", hash = "sha256:e285563ea6bdcf38fde927af4825f566f9c9ede68384f4d1ea4244bbe73a4404", size = 1060759, upload-time = "2026-10-08T14:38:09.511Z" },
+    { url = "https://files.pythonhosted.org/packages/63/1d/92ede7c3ae69d5dbfadd42e09f2bda5afdb9c1125425eca9b57f15bc66a8/shimpz-0.6.0-cp314-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:30c44f2ae331d0a61e10bd87036d63efdc8220ab321a49d96f4ea093cdf019b6", size = 1136834, upload-time = "2026-10-08T14:38:11.406Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/d8/278a96fabcc734f86c3e0f2f3edd53652bfbd4130ec69e418214da13b015/shimpz-0.6.0-cp314-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6207d75359bd2ab26734fd8e73f6669da4ab9fce06e667b0e566c2bf8949edb5", size = 1218528, upload-time = "2026-10-08T14:38:13.135Z" },
+    { url = "https://files.pythonhosted.org/packages/f1/87/eae22c144a92c28d8fe1b2fa52630098e4c995ec6542cc149db67742ef82/shimpz-0.6.0-cp314-abi3-win_amd64.whl", hash = "sha256:503be1c106005f268697d68151b796cd2a7c3aeb2cc44580880a4cfb270ff949", size = 1106346, upload-time = "2026-10-08T14:38:14.604Z" },
 ]
 
 [[package]]

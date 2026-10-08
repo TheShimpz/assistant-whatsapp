@@ -896,11 +896,16 @@ def _project() -> AssistantProject:
     return AssistantProject.load(ROOT)
 
 
-def _invoke(action_id: str, inputs: dict[str, object], responses: list[dict[str, object]]) -> object:
+def _invoke(
+    action_id: str,
+    inputs: dict[str, object],
+    responses: list[dict[str, object]],
+    stored_inputs: dict[str, str] | None = None,
+) -> object:
     invocation = ActionInvocation(
         inputs=inputs,
         integrations={},
-        stored_inputs={},
+        stored_inputs=stored_inputs or {},
         operation_id=OPERATION_ID,
         responses=tuple(responses),
     )
@@ -908,7 +913,10 @@ def _invoke(action_id: str, inputs: dict[str, object], responses: list[dict[str,
 
 
 def _granted_transcript(action_id: str, inputs: dict[str, object]) -> list[dict[str, object]]:
-    """Answer the approval and the just-in-time token request exactly as Team replays them."""
+    """Answer the approval and the just-in-time token request exactly as Team replays them.
+
+    Team seals the token when the person answers it and injects it, so only the approval enters the transcript.
+    """
     with pytest.raises(HumanRequestSuspension) as approval:
         _invoke(action_id, inputs, [])
     assert approval.value.request["kind"] == "approval"
@@ -919,9 +927,7 @@ def _granted_transcript(action_id: str, inputs: dict[str, object]) -> list[dict[
         _invoke(action_id, inputs, responses)
     assert password.value.request["kind"] == "input:password"
     assert password.value.request["stored_input"] == "whatsapp-token"
-    responses.append(
-        {"kind": "input:password", "ordinal": 1, "fingerprint": password.value.request["fingerprint"], "value": TOKEN}
-    )
+    assert password.value.request["ordinal"] == 1
     return responses
 
 
@@ -1008,7 +1014,7 @@ def test_replayed_approval_sends_exactly_the_approved_request(
     reply = {"success": True} if action_id == "mark-message-read" else _success()
     session = _Session([_Response(reply)])
     with patch("lib.runtime.create_http_session", return_value=session):
-        result = _invoke(action_id, approved, responses)
+        result = _invoke(action_id, approved, responses, {"whatsapp-token": TOKEN})
 
     assert len(session.requests) == 1
     assert TOKEN not in json.dumps(result)
@@ -1034,7 +1040,7 @@ def test_approval_never_authorizes_a_changed_request(
     responses = _granted_transcript(action_id, approved)
     session = _Session([])
     with patch("lib.runtime.create_http_session", return_value=session), pytest.raises(ActionFailure) as failed:
-        _invoke(action_id, changed, responses)
+        _invoke(action_id, changed, responses, {"whatsapp-token": TOKEN})
 
     assert session.requests == []
     assert TOKEN not in json.dumps(failed.value.envelope)

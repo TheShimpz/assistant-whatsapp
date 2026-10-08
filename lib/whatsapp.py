@@ -327,7 +327,7 @@ def create_http_session() -> aiohttp.ClientSession:
         auto_decompress=False,
         timeout=HTTP_TIMEOUT,
         trust_env=True,
-        headers={"User-Agent": "assistant-whatsapp/0.3.0"},
+        headers={"User-Agent": "assistant-whatsapp/0.3.1"},
     )
     return session
 
