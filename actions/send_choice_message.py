@@ -9,6 +9,7 @@ from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
 
 
 @action(
+    description="Send a message with reply buttons or a list.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

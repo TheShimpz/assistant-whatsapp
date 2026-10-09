@@ -8,6 +8,7 @@ from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult, TextMessag
 
 
 @action(
+    description="Send a text message.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

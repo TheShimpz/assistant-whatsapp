@@ -8,6 +8,7 @@ from lib.whatsapp import ContactsMessage, PhoneNumberId, Recipient, SendMessageR
 
 
 @action(
+    description="Send contact cards.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

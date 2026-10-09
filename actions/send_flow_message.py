@@ -9,6 +9,7 @@ from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
 
 
 @action(
+    description="Send a WhatsApp Flow.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

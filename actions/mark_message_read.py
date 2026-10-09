@@ -8,6 +8,7 @@ from lib.whatsapp import PhoneNumberId, ReadReceipt, ReadReceiptResult
 
 
 @action(
+    description="Mark one incoming message as read.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

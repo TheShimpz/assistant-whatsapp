@@ -37,7 +37,7 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
 
     assert set(manifest) == {"shimpz", "network", "stored_inputs"}
     metadata = manifest["shimpz"]
-    assert set(metadata) == {"spec", "id", "version", "name", "summary", "creators", "github", "genesis"}
+    assert set(metadata) == {"spec", "id", "version", "name", "summary", "description", "creators", "github", "genesis"}
     assert metadata["spec"] == 1
     assert metadata["id"] == "whatsapp"
     assert re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", metadata["version"])

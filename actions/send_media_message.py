@@ -8,6 +8,7 @@ from lib.whatsapp import MediaMessage, PhoneNumberId, Recipient, SendMessageResu
 
 
 @action(
+    description="Send a media file.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

@@ -8,6 +8,7 @@ from lib.whatsapp import PhoneNumberId, ReactionMessage, Recipient, SendMessageR
 
 
 @action(
+    description="Add or remove a reaction to a message.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

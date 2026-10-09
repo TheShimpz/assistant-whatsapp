@@ -8,6 +8,7 @@ from lib.whatsapp import LocationMessage, PhoneNumberId, Recipient, SendMessageR
 
 
 @action(
+    description="Send a location.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )

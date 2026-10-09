@@ -9,6 +9,7 @@ from lib.whatsapp import PhoneNumberId, Recipient, SendMessageResult
 
 
 @action(
+    description="Send an approved message template.",
     stored_inputs=["whatsapp-token"],
     human_requests=["approval", "input:password"],
 )
