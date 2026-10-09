@@ -47,7 +47,13 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
         "whatsapp-token": {
             "kind": "password",
             "label": "WhatsApp access token",
-            "description": "Meta access token used by the WhatsApp Cloud API.",
+            "description": (
+                "A key that lets this Assistant send WhatsApp messages for your business. In Meta Business settings, "
+                "open Users > System users, add a system user, and assign it your app and your WhatsApp account. "
+                "Then choose Generate token, pick your app, tick whatsapp_business_messaging and "
+                "whatsapp_business_management, and copy the token."
+            ),
+            "help_url": "https://developers.facebook.com/documentation/business-messaging/whatsapp/access-tokens",
             "host": "graph.facebook.com",
             "header": "Authorization",
             "scheme": "Bearer",
