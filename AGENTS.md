@@ -6,8 +6,8 @@
   client, public result schemas, and component tests.
 - It does not own Stored Input custody, Team installation, Developers publication, Brain planning, or platform egress
   enforcement.
-- The Assistant receives the Meta access token only through the declared `whatsapp-token` Stored Input. It must
-  never read the token from an environment variable, log it, return it, or persist it itself.
+- The Assistant never holds the Meta access token: Team keeps the declared `whatsapp-token` Stored Input and adds it
+  to each call the Assistant makes with `ctx.fetch` (ADR-0106). Never read a token from an environment variable.
 
 ## Delivery
 
@@ -21,7 +21,7 @@
 - Require human approval before every externally visible message send.
 - Request the token just in time after approval. Explicitly reject only a provider-confirmed invalid token; never
   clear it for permission, policy, recipient, rate-limit, timeout, or ambiguous failures.
-- Reject redirects, oversized or malformed provider responses, and any error path that could disclose a credential.
+- Reject redirects and oversized or malformed provider responses.
 - Never retry an uncertain message send.
 - Use Python 3.14.
 

@@ -1,21 +1,27 @@
-"""Bounded WhatsApp Cloud API client."""
+"""Bounded WhatsApp Cloud API client through calls the Team makes.
+
+The Action never holds the access token: the Team places the stored whatsapp-token in an ``Authorization: Bearer``
+header on graph.facebook.com, as ``shimpz.toml`` declares (ADR-0106).
+"""
 
 import json
 import re
 import unicodedata
+from collections.abc import Mapping
 from datetime import date
 from ipaddress import ip_address
 from math import isfinite
-from typing import Annotated, Any, Literal, NotRequired, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Protocol, TypedDict
 from urllib.parse import quote, urlsplit
 
-import aiohttp
+from shimpz import FetchError, Response
 
 GRAPH_API_ORIGIN = "https://graph.facebook.com"
 GRAPH_API_VERSION = "v23.0"
 MAX_RESPONSE_BYTES = 64 * 1024
 MAX_REQUEST_BYTES = 64 * 1024
-HTTP_TIMEOUT = aiohttp.ClientTimeout(total=8, connect=3, sock_connect=3, sock_read=5)
+# One call finishes inside the Controller's Action deadline.
+CALL_TIMEOUT_MS = 7000
 _PHONE_NUMBER_ID_PATTERN = r"^[1-9][0-9]{4,31}$"
 _RECIPIENT_PATTERN = r"^\+?[1-9][0-9]{7,14}$"
 _PHONE_NUMBER_ID = re.compile(_PHONE_NUMBER_ID_PATTERN)
@@ -166,10 +172,23 @@ class WhatsAppTokenRejected(WhatsAppApiError):
     """WhatsApp explicitly rejected the supplied access token."""
 
 
+class Fetcher(Protocol):
+    """The one capability the client needs: a provider call the Team makes with the stored token."""
+
+    async def fetch(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] = ...,
+        body: bytes | None = ...,
+        timeout_ms: int | None = ...,
+    ) -> Response: ...
+
+
 class WhatsAppApiClient:
-    def __init__(self, session: aiohttp.ClientSession, access_token: str) -> None:
-        self._session = session
-        self._access_token = _access_token(access_token)
+    def __init__(self, fetcher: Fetcher) -> None:
+        self._fetcher = fetcher
 
     async def send_text_message(
         self,
@@ -295,64 +314,31 @@ class WhatsAppApiClient:
 
     async def _request(self, sender: str, method: str, body: bytes) -> dict[str, Any]:
         path = f"/{GRAPH_API_VERSION}/{quote(sender, safe='')}/messages"
-        headers = {
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-            "Authorization": f"Bearer {self._access_token}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
         try:
-            async with self._session.request(
-                method,
-                f"{GRAPH_API_ORIGIN}{path}",
-                headers=headers,
-                data=body,
-                allow_redirects=False,
-            ) as response:
-                raw = await _read_response(response)
-                payload = _json_object(raw)
-                if 400 <= response.status < 500 and _error_code(payload) == 190:
-                    raise WhatsAppTokenRejected("WhatsApp rejected the access token")
-                if response.status != 200:
-                    raise WhatsAppApiError("WhatsApp rejected the request")
-                return payload
-        except WhatsAppApiError:
-            raise
-        except (aiohttp.ClientError, TimeoutError, OSError):
+            response = await self._fetcher.fetch(
+                method, f"{GRAPH_API_ORIGIN}{path}", headers=headers, body=body, timeout_ms=CALL_TIMEOUT_MS
+            )
+        except FetchError:
+            # No answer from WhatsApp proves nothing about a send, so its outcome stays uncertain.
             raise WhatsAppApiError("WhatsApp request failed") from None
+        payload = _json_object(_read_response(response))
+        if 400 <= response.status < 500 and _error_code(payload) == 190:
+            raise WhatsAppTokenRejected("WhatsApp rejected the access token")
+        if response.status != 200:
+            raise WhatsAppApiError("WhatsApp rejected the request")
+        return payload
 
 
-def create_http_session() -> aiohttp.ClientSession:
-    session = aiohttp.ClientSession(
-        auto_decompress=False,
-        timeout=HTTP_TIMEOUT,
-        trust_env=True,
-        headers={"User-Agent": "assistant-whatsapp/0.3.1"},
-    )
-    return session
-
-
-async def _read_response(response: Any) -> bytes:
-    media_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-    content_encoding = response.headers.get("Content-Encoding", "").strip()
-    raw_length = response.headers.get("Content-Length")
-    if media_type != "application/json" or content_encoding:
+def _read_response(response: Response) -> bytes:
+    media_type = (response.header("Content-Type") or "").split(";", 1)[0].strip().lower()
+    if media_type != "application/json" or (response.header("Content-Encoding") or "").strip():
         raise WhatsAppApiError("WhatsApp response metadata is invalid")
-    if raw_length is not None and (
-        not raw_length.isascii() or not raw_length.isdigit() or int(raw_length) > MAX_RESPONSE_BYTES
-    ):
+    if len(response.body) > MAX_RESPONSE_BYTES:
         raise WhatsAppApiError("WhatsApp response size is invalid")
-    raw = bytearray()
-    while True:
-        chunk = await response.content.read(min(16 * 1024, (MAX_RESPONSE_BYTES + 1) - len(raw)))
-        if not chunk:
-            break
-        raw.extend(chunk)
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise WhatsAppApiError("WhatsApp response size is invalid")
-    if not raw:
+    if not response.body:
         raise WhatsAppApiError("WhatsApp response is empty")
-    return bytes(raw)
+    return response.body
 
 
 def _json_object(raw: bytes) -> dict[str, Any]:
@@ -389,16 +375,6 @@ def _send_result(payload: dict[str, Any], recipient: str) -> SendMessageResult:
 def _phone_number_id(value: object) -> str:
     if not isinstance(value, str) or _PHONE_NUMBER_ID.fullmatch(value) is None:
         raise WhatsAppApiError("WhatsApp sender phone-number id is invalid")
-    return value
-
-
-def _access_token(value: object) -> str:
-    if (
-        not isinstance(value, str)
-        or not 1 <= len(value) <= 1024
-        or any(not 33 <= ord(character) <= 126 for character in value)
-    ):
-        raise WhatsAppApiError("WhatsApp access token is invalid")
     return value
 
 

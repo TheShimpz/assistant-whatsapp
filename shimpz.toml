@@ -1,7 +1,7 @@
 [shimpz]
 spec = 1
 id = "whatsapp"
-version = "0.3.1"
+version = "0.4.0"
 name = "WhatsApp"
 summary = "Notify your customers on WhatsApp without typing message after message."
 creators = ["@shimpz"]
@@ -27,10 +27,10 @@ outside it, use an existing approved template. Do not invent templates, media, c
 message ids, senders, recipients, or content. A Flow token is only a non-secret response-correlation value and must
 never contain a credential.
 
-Every externally visible Action asks for approval before it obtains the WhatsApp access token. The token is requested
-just in time on first use as the whatsapp-token Stored Input, sealed by the Team only after a successful secret-free
-result, and reused without another token prompt. Never ask for it in chat, accept it as an Action argument, expose it,
-or copy it into any result. A provider-confirmed invalid token is discarded; permission, policy, recipient,
+Every externally visible Action asks for approval before the Team makes any WhatsApp call for it. The access token is
+requested just in time on first use as the whatsapp-token Stored Input, kept by the Team, and reused without another
+token prompt; the Team adds it to each WhatsApp call, so this Assistant never holds it. Never ask for it in chat or
+accept it as an Action argument. A provider-confirmed invalid token is discarded; permission, policy, recipient,
 rate-limit, timeout, and ambiguous failures do not discard it.
 
 Treat each returned Meta message id only as acceptance, never as delivery. Never retry an uncertain effect. A
@@ -45,3 +45,6 @@ allowed_hosts = ["graph.facebook.com"]
 kind = "password"
 label = "WhatsApp access token"
 description = "Meta access token used by the WhatsApp Cloud API."
+host = "graph.facebook.com"
+header = "Authorization"
+scheme = "Bearer"

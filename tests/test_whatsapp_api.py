@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import functools
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
-import aiohttp
 import pytest
-from shimpz import Context, InputRequest, Text
+import shimpz
+from shimpz import Context, FetchError, InputRequest, Text
 from shimpz._human import HumanRequestSuspension
 from shimpz._project import AssistantProject, load_catalog_document
 from shimpz._reference import render_request
@@ -33,12 +34,10 @@ from lib.whatsapp import (
     WhatsAppApiClient,
     WhatsAppApiError,
     WhatsAppTokenRejected,
-    create_http_session,
 )
 
 SENDER_ID = "123456789012345"
 RECIPIENT = "15555550123"
-TOKEN = "opaque-meta-access-token"
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG = load_catalog_document(ROOT)["messages"]
 OPERATION_ID = "0b1f6c1e-3d6a-4f7e-9a2b-5c8d7e6f1a20"
@@ -56,52 +55,56 @@ def _assert_bound_copy(description: object, shown: str) -> None:
     assert _REFERENCE_SENTENCE.fullmatch(description.removeprefix(shown)) is not None
 
 
-class _Content:
-    def __init__(self, raw: bytes) -> None:
-        self.raw = raw
-        self.offset = 0
-
-    async def read(self, size: int) -> bytes:
-        chunk = self.raw[self.offset : self.offset + size]
-        self.offset += len(chunk)
-        return chunk
-
-
 class _Response:
-    def __init__(self, payload: object, *, status: int = 200, headers: dict[str, str] | None = None) -> None:
+    """One queued answer: WhatsApp's response, or the Team's closed error when ``error`` is set."""
+
+    def __init__(
+        self,
+        payload: object,
+        *,
+        status: int = 200,
+        headers: dict[str, str] | None = None,
+        error: str | None = None,
+    ) -> None:
         self.raw = payload if isinstance(payload, bytes) else json.dumps(payload, separators=(",", ":")).encode()
         self.status = status
-        self.headers = {
-            "Content-Type": "application/json",
-            "Content-Length": str(len(self.raw)),
-            **(headers or {}),
-        }
-        self.content = _Content(self.raw)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
+        self.headers = {"Content-Type": "application/json", **(headers or {})}
+        self.error = error
 
 
 class _Session:
+    """Records every Team-made call, as ``ctx.fetch`` or as the SDK's provider channel, and answers from a queue."""
+
     def __init__(self, responses: list[_Response], events: list[str] | None = None) -> None:
         self.responses = responses
         self.requests: list[tuple[str, dict[str, Any]]] = []
         self.events = events
 
-    def request(self, method: str, url: str, **kwargs: Any) -> _Response:
-        self.requests.append((url, {"method": method, **kwargs}))
+    async def fetch(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str] = (),
+        body: bytes | None = None,
+        timeout_ms: int | None = None,
+    ) -> shimpz.Response:
+        return self._answer(method, url, dict(headers), body, timeout_ms)
+
+    def call(self, frame: dict[str, Any]) -> shimpz.Response:
+        body = base64.b64decode(frame["body"]) if "body" in frame else None
+        return self._answer(frame["method"], frame["url"], dict(frame["headers"]), body, frame.get("timeout_ms"))
+
+    def _answer(
+        self, method: str, url: str, headers: dict[str, str], body: bytes | None, timeout_ms: int | None
+    ) -> shimpz.Response:
+        self.requests.append((url, {"method": method, "headers": headers, "data": body, "timeout_ms": timeout_ms}))
         if self.events is not None:
             self.events.append("provider")
-        return self.responses.pop(0)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args: object) -> None:
-        return None
+        answer = self.responses.pop(0)
+        if answer.error is not None:
+            raise FetchError(answer.error)
+        return shimpz.Response(answer.status, tuple(answer.headers.items()), answer.raw)
 
 
 class _StoredInputRejected(RuntimeError):
@@ -109,16 +112,21 @@ class _StoredInputRejected(RuntimeError):
 
 
 class _ActionContext:
-    """Route every human request through the SDK and record its English rendering."""
+    """Route every human request through the SDK, record its English rendering, and serve calls from ``session``."""
+
+    session: _Session | None = None
 
     def __init__(self, events: list[str]) -> None:
         self.events = events
         self.approvals: list[dict[str, object]] = []
 
+    async def fetch(self, method: str, url: str, **options: Any) -> shimpz.Response:
+        assert self.session is not None, "no Team-made call was expected"
+        return await self.session.fetch(method, url, **options)
+
     @staticmethod
     def _suspend(request: Callable[[Context], object]) -> dict[str, object]:
         sdk_context = Context(
-            {},
             ActionDeclaration(
                 human_requests=["approval", "input:password"],
                 stored_inputs=["whatsapp-token"],
@@ -133,11 +141,10 @@ class _ActionContext:
         rendered = self._suspend(lambda sdk: sdk.request_approval(title=title, description=description))
         assert rendered["kind"] == "approval"
         assert "WhatsApp" in rendered["title"]
-        assert TOKEN not in rendered["description"]
         self.approvals.append(rendered)
         self.events.append("approval")
 
-    def request_input(self, request: InputRequest) -> str:
+    def request_input(self, request: InputRequest) -> None:
         frame = self._suspend(lambda sdk: sdk.request_input(request))
         assert set(frame) == {
             "kind",
@@ -168,7 +175,6 @@ class _ActionContext:
         assert isinstance(frame["fingerprint"], str)
         assert len(frame["fingerprint"]) == 64
         self.events.append("stored-input")
-        return TOKEN
 
     def reject_stored_input(self, stored_input: str) -> None:
         assert stored_input == "whatsapp-token"
@@ -184,27 +190,28 @@ def _success() -> dict[str, object]:
     }
 
 
-def test_http_session_honors_the_team_egress_proxy_environment() -> None:
-    async def inspect_session() -> None:
-        async with create_http_session() as session:
-            assert session.trust_env is True
+@contextmanager
+def _serving(session: _Session) -> Iterator[None]:
+    """Answer every ``_ActionContext`` provider call from ``session`` for the block."""
+    _ActionContext.session = session
+    try:
+        yield
+    finally:
+        _ActionContext.session = None
 
-    asyncio.run(inspect_session())
 
-
-def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
+def test_sends_one_exact_text_message_through_a_team_made_call() -> None:
     session = _Session([_Response(_success())])
 
     result = asyncio.run(
-        WhatsAppApiClient(session, TOKEN).send_text_message(SENDER_ID, f"+{RECIPIENT}", {"body": "Hello"})
+        WhatsAppApiClient(session).send_text_message(SENDER_ID, f"+{RECIPIENT}", {"body": "Hello"})
     )
 
     assert result == {"recipient": RECIPIENT, "whatsapp_id": RECIPIENT, "message_id": "wamid.message-id"}
     url, request = session.requests[0]
     assert url == f"https://graph.facebook.com/v23.0/{SENDER_ID}/messages"
     assert request["method"] == "POST"
-    assert request["allow_redirects"] is False
-    assert request["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert request["headers"] == {"Accept": "application/json", "Content-Type": "application/json"}
     assert json.loads(request["data"]) == {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
@@ -212,14 +219,13 @@ def test_sends_one_exact_text_message_without_exposing_the_token() -> None:
         "type": "text",
         "text": {"preview_url": False, "body": "Hello"},
     }
-    assert TOKEN not in json.dumps(result)
 
 
 def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -> None:
     for response in (_Response({"error": {"code": 190}}, status=400),):
         with pytest.raises(WhatsAppTokenRejected):
             asyncio.run(
-                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(
+                WhatsAppApiClient(_Session([response])).send_text_message(
                     SENDER_ID, RECIPIENT, {"body": "Hello"}
                 )
             )
@@ -233,7 +239,7 @@ def test_distinguishes_explicit_token_rejection_from_other_provider_failures() -
     ):
         with pytest.raises(WhatsAppApiError) as failure:
             asyncio.run(
-                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(
+                WhatsAppApiClient(_Session([response])).send_text_message(
                     SENDER_ID, RECIPIENT, {"body": "Hello"}
                 )
             )
@@ -245,7 +251,7 @@ def test_action_orders_approval_before_stored_input_and_provider() -> None:
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
 
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(send_text_message(SENDER_ID, RECIPIENT, {"body": "Hello"}, ctx=ctx))
 
     assert result["message_id"] == "wamid.message-id"
@@ -276,7 +282,7 @@ def test_action_clears_only_an_explicitly_rejected_token() -> None:
     rejected_events: list[str] = []
     rejected = _Session([_Response({"error": {"code": 190}}, status=400)], rejected_events)
     with (
-        patch("lib.runtime.create_http_session", return_value=rejected),
+        _serving(rejected),
         pytest.raises(_StoredInputRejected),
     ):
         asyncio.run(send_text_message(SENDER_ID, RECIPIENT, {"body": "Hello"}, ctx=_ActionContext(rejected_events)))
@@ -285,7 +291,7 @@ def test_action_clears_only_an_explicitly_rejected_token() -> None:
     denied_events: list[str] = []
     denied = _Session([_Response({"error": {"code": 200}}, status=403)], denied_events)
     with (
-        patch("lib.runtime.create_http_session", return_value=denied),
+        _serving(denied),
         pytest.raises(WhatsAppApiError),
     ):
         asyncio.run(send_text_message(SENDER_ID, RECIPIENT, {"body": "Hello"}, ctx=_ActionContext(denied_events)))
@@ -302,33 +308,29 @@ def test_rejects_ambiguous_or_oversized_provider_results() -> None:
     for response in invalid:
         with pytest.raises(WhatsAppApiError):
             asyncio.run(
-                WhatsAppApiClient(_Session([response]), TOKEN).send_text_message(
+                WhatsAppApiClient(_Session([response])).send_text_message(
                     SENDER_ID, RECIPIENT, {"body": "Hello"}
                 )
             )
 
 
-def test_redacts_token_from_unexpected_transport_errors() -> None:
-    class _ExplodingSession:
-        def request(self, *_args: object, **_kwargs: object) -> _Response:
-            raise aiohttp.ClientConnectionError(f"transport accidentally exposed {TOKEN}")
-
-    with pytest.raises(WhatsAppApiError, match="WhatsApp request failed") as failure:
-        asyncio.run(
-            WhatsAppApiClient(_ExplodingSession(), TOKEN).send_text_message(
-                SENDER_ID, RECIPIENT, {"body": "Hello"}
+def test_a_team_refusal_is_a_failed_request_that_never_clears_the_token() -> None:
+    for code in ("refused", "credential-missing", "unavailable", "failed"):
+        with pytest.raises(WhatsAppApiError, match="WhatsApp request failed") as failure:
+            asyncio.run(
+                WhatsAppApiClient(_Session([_Response({}, error=code)])).send_text_message(
+                    SENDER_ID, RECIPIENT, {"body": "Hello"}
+                )
             )
-        )
-
-    assert failure.value.__cause__ is None
-    assert TOKEN not in str(failure.value)
+        assert not isinstance(failure.value, WhatsAppTokenRejected)
+        assert failure.value.__cause__ is None
 
 
 def test_sends_text_preview_and_reply_context() -> None:
     session = _Session([_Response(_success())])
 
     asyncio.run(
-        WhatsAppApiClient(session, TOKEN).send_text_message(
+        WhatsAppApiClient(session).send_text_message(
             SENDER_ID,
             RECIPIENT,
             {"body": "See https://example.com", "preview_url": True, "reply_to_message_id": "wamid.previous"},
@@ -348,7 +350,7 @@ def test_sends_text_preview_and_reply_context() -> None:
 def test_sends_media_by_id_and_https_link_with_exact_fields() -> None:
     image_session = _Session([_Response(_success())])
     asyncio.run(
-        WhatsAppApiClient(image_session, TOKEN).send_media_message(
+        WhatsAppApiClient(image_session).send_media_message(
             SENDER_ID,
             RECIPIENT,
             {
@@ -370,7 +372,7 @@ def test_sends_media_by_id_and_https_link_with_exact_fields() -> None:
 
     document_session = _Session([_Response(_success())])
     asyncio.run(
-        WhatsAppApiClient(document_session, TOKEN).send_media_message(
+        WhatsAppApiClient(document_session).send_media_message(
             SENDER_ID,
             RECIPIENT,
             {
@@ -401,14 +403,14 @@ def test_sends_media_by_id_and_https_link_with_exact_fields() -> None:
 def test_rejects_invalid_media_combinations_before_provider(message: dict[str, object]) -> None:
     session = _Session([])
     with pytest.raises(WhatsAppApiError):
-        asyncio.run(WhatsAppApiClient(session, TOKEN).send_media_message(SENDER_ID, RECIPIENT, message))
+        asyncio.run(WhatsAppApiClient(session).send_media_message(SENDER_ID, RECIPIENT, message))
     assert session.requests == []
 
 
 def test_media_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_media_message(
                 SENDER_ID,
@@ -424,7 +426,7 @@ def test_media_action_orders_approval_before_stored_input_and_provider() -> None
 def test_sends_location_with_optional_fields_and_reply() -> None:
     session = _Session([_Response(_success())])
     asyncio.run(
-        WhatsAppApiClient(session, TOKEN).send_location_message(
+        WhatsAppApiClient(session).send_location_message(
             SENDER_ID,
             RECIPIENT,
             {
@@ -464,7 +466,7 @@ def test_sends_location_with_optional_fields_and_reply() -> None:
 def test_rejects_invalid_locations_before_provider(location: dict[str, object]) -> None:
     session = _Session([])
     with pytest.raises(WhatsAppApiError):
-        asyncio.run(WhatsAppApiClient(session, TOKEN).send_location_message(SENDER_ID, RECIPIENT, location))
+        asyncio.run(WhatsAppApiClient(session).send_location_message(SENDER_ID, RECIPIENT, location))
     assert session.requests == []
 
 
@@ -472,7 +474,7 @@ def test_location_action_orders_approval_before_stored_input_and_provider() -> N
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_location_message(
                 SENDER_ID,
@@ -514,7 +516,7 @@ def _complete_contact() -> dict[str, object]:
 def test_sends_complete_contact_cards_and_reply_context() -> None:
     session = _Session([_Response(_success())])
     asyncio.run(
-        WhatsAppApiClient(session, TOKEN).send_contacts_message(
+        WhatsAppApiClient(session).send_contacts_message(
             SENDER_ID,
             RECIPIENT,
             {"contacts": [_complete_contact()], "reply_to_message_id": "wamid.previous"},
@@ -546,14 +548,14 @@ def test_sends_complete_contact_cards_and_reply_context() -> None:
 def test_rejects_invalid_contact_cards_before_provider(message: dict[str, object]) -> None:
     session = _Session([])
     with pytest.raises(WhatsAppApiError):
-        asyncio.run(WhatsAppApiClient(session, TOKEN).send_contacts_message(SENDER_ID, RECIPIENT, message))
+        asyncio.run(WhatsAppApiClient(session).send_contacts_message(SENDER_ID, RECIPIENT, message))
     assert session.requests == []
 
 
 def test_contacts_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_contacts_message(
                 SENDER_ID,
@@ -570,7 +572,7 @@ def test_contacts_action_orders_approval_before_stored_input_and_provider() -> N
 def test_adds_or_removes_one_message_reaction(emoji: str) -> None:
     session = _Session([_Response(_success())])
     asyncio.run(
-        WhatsAppApiClient(session, TOKEN).set_message_reaction(
+        WhatsAppApiClient(session).set_message_reaction(
             SENDER_ID,
             RECIPIENT,
             {"message_id": "wamid.target", "emoji": emoji},
@@ -590,7 +592,7 @@ def test_rejects_invalid_reactions_before_provider(emoji: str) -> None:
     session = _Session([])
     with pytest.raises(WhatsAppApiError):
         asyncio.run(
-            WhatsAppApiClient(session, TOKEN).set_message_reaction(
+            WhatsAppApiClient(session).set_message_reaction(
                 SENDER_ID,
                 RECIPIENT,
                 {"message_id": "wamid.target", "emoji": emoji},
@@ -603,7 +605,7 @@ def test_reaction_action_orders_approval_before_stored_input_and_provider() -> N
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             set_message_reaction(
                 SENDER_ID,
@@ -630,7 +632,7 @@ def test_marks_incoming_message_read_with_optional_typing_indicator(
 ) -> None:
     session = _Session([_Response({"success": True})])
     result = asyncio.run(
-        WhatsAppApiClient(session, TOKEN).mark_message_read(
+        WhatsAppApiClient(session).mark_message_read(
             SENDER_ID,
             {"message_id": "wamid.incoming", "typing_indicator": typing_indicator},
         )
@@ -656,7 +658,7 @@ def test_rejects_invalid_read_receipt_results_and_inputs() -> None:
     invalid_result = _Session([_Response({"success": False})])
     with pytest.raises(WhatsAppApiError, match="read receipt result"):
         asyncio.run(
-            WhatsAppApiClient(invalid_result, TOKEN).mark_message_read(
+            WhatsAppApiClient(invalid_result).mark_message_read(
                 SENDER_ID,
                 {"message_id": "wamid.incoming"},
             )
@@ -665,7 +667,7 @@ def test_rejects_invalid_read_receipt_results_and_inputs() -> None:
     no_request = _Session([])
     with pytest.raises(WhatsAppApiError, match="typing indicator"):
         asyncio.run(
-            WhatsAppApiClient(no_request, TOKEN).mark_message_read(
+            WhatsAppApiClient(no_request).mark_message_read(
                 SENDER_ID,
                 {"message_id": "wamid.incoming", "typing_indicator": "yes"},
             )
@@ -677,7 +679,7 @@ def test_read_receipt_action_orders_approval_before_stored_input_and_provider() 
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response({"success": True})], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             mark_message_read(
                 SENDER_ID,
@@ -697,7 +699,7 @@ def test_long_message_id_fits_the_approval_description() -> None:
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response({"success": True})], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             mark_message_read(
                 SENDER_ID,
@@ -717,7 +719,7 @@ def test_template_action_orders_approval_before_stored_input_and_provider() -> N
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_template_message(
                 SENDER_ID,
@@ -742,7 +744,7 @@ def test_long_template_name_fits_the_approval_description() -> None:
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_template_message(
                 SENDER_ID,
@@ -763,7 +765,7 @@ def test_underscore_template_name_states_why_it_is_not_shown() -> None:
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_template_message(
                 SENDER_ID,
@@ -785,7 +787,7 @@ def test_choice_action_orders_approval_before_stored_input_and_provider() -> Non
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_choice_message(
                 SENDER_ID,
@@ -811,7 +813,7 @@ def test_catalog_action_orders_approval_before_stored_input_and_provider() -> No
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_catalog_message(
                 SENDER_ID,
@@ -837,7 +839,7 @@ def test_flow_action_orders_approval_before_stored_input_and_provider() -> None:
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_flow_message(
                 SENDER_ID,
@@ -866,7 +868,7 @@ def test_long_flow_name_fits_the_approval_description() -> None:
     events: list[str] = []
     ctx = _ActionContext(events)
     session = _Session([_Response(_success())], events)
-    with patch("lib.runtime.create_http_session", return_value=session):
+    with _serving(session):
         result = asyncio.run(
             send_flow_message(
                 SENDER_ID,
@@ -900,14 +902,15 @@ def _invoke(
     action_id: str,
     inputs: dict[str, object],
     responses: list[dict[str, object]],
-    stored_inputs: dict[str, str] | None = None,
+    stored_inputs: tuple[str, ...] = (),
+    channel: _Session | None = None,
 ) -> object:
     invocation = ActionInvocation(
         inputs=inputs,
-        integrations={},
-        stored_inputs=stored_inputs or {},
+        stored_inputs=stored_inputs,
         operation_id=OPERATION_ID,
         responses=tuple(responses),
+        channel=channel,  # type: ignore[arg-type]
     )
     return asyncio.run(invoke_action(_project(), action_id, invocation))
 
@@ -915,7 +918,7 @@ def _invoke(
 def _granted_transcript(action_id: str, inputs: dict[str, object]) -> list[dict[str, object]]:
     """Answer the approval and the just-in-time token request exactly as Team replays them.
 
-    Team seals the token when the person answers it and injects it, so only the approval enters the transcript.
+    Team seals the token when the person answers it and keeps it, so only the approval enters the transcript.
     """
     with pytest.raises(HumanRequestSuspension) as approval:
         _invoke(action_id, inputs, [])
@@ -1013,11 +1016,10 @@ def test_replayed_approval_sends_exactly_the_approved_request(
     responses = _granted_transcript(action_id, approved)
     reply = {"success": True} if action_id == "mark-message-read" else _success()
     session = _Session([_Response(reply)])
-    with patch("lib.runtime.create_http_session", return_value=session):
-        result = _invoke(action_id, approved, responses, {"whatsapp-token": TOKEN})
+    result = _invoke(action_id, approved, responses, ("whatsapp-token",), session)
 
     assert len(session.requests) == 1
-    assert TOKEN not in json.dumps(result)
+    assert isinstance(result, dict)
     body = json.loads(session.requests[0][1]["data"])
     if action_id == "set-message-reaction":
         assert body["reaction"] == approved["reaction"]
@@ -1039,11 +1041,10 @@ def test_approval_never_authorizes_a_changed_request(
 ) -> None:
     responses = _granted_transcript(action_id, approved)
     session = _Session([])
-    with patch("lib.runtime.create_http_session", return_value=session), pytest.raises(ActionFailure) as failed:
-        _invoke(action_id, changed, responses, {"whatsapp-token": TOKEN})
+    with pytest.raises(ActionFailure):
+        _invoke(action_id, changed, responses, ("whatsapp-token",), session)
 
     assert session.requests == []
-    assert TOKEN not in json.dumps(failed.value.envelope)
     with pytest.raises(HumanRequestSuspension) as fresh:
         _invoke(action_id, changed, [])
     assert fresh.value.request["fingerprint"] != responses[0]["fingerprint"]

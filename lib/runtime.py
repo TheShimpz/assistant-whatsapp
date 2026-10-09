@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from shimpz import Context, InputRequest, Text, text
 
-from lib.whatsapp import WhatsAppApiClient, WhatsAppTokenRejected, create_http_session
+from lib.whatsapp import WhatsAppApiClient, WhatsAppTokenRejected
 
 
 @asynccontextmanager
@@ -17,9 +17,9 @@ async def approved_whatsapp_client(
     title: Text,
     description: Text,
 ) -> AsyncIterator[WhatsAppApiClient]:
-    """Approve one effect, then expose a token-bound client for that effect."""
+    """Approve one effect, make sure the Team holds the token, then expose a client whose calls the Team signs."""
     ctx.request_approval(title=title, description=description)
-    token = ctx.request_input(
+    ctx.request_input(
         InputRequest(
             kind="password",
             title=text("WhatsApp access token"),
@@ -31,14 +31,7 @@ async def approved_whatsapp_client(
         )
     )
     try:
-        async with create_http_session() as session:
-            client = WhatsAppApiClient(session, token)
-            try:
-                yield client
-            finally:
-                del client
+        yield WhatsAppApiClient(ctx)
     except WhatsAppTokenRejected:
         ctx.reject_stored_input("whatsapp-token")
         raise AssertionError("Stored Input rejection unexpectedly returned") from None
-    finally:
-        token = ""

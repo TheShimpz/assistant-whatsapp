@@ -41,13 +41,16 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
     assert metadata["spec"] == 1
     assert metadata["id"] == "whatsapp"
     assert re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", metadata["version"])
-    assert metadata["version"] == "0.3.1"
+    assert metadata["version"] == "0.4.0"
     assert manifest["network"] == {"allowed_hosts": ["graph.facebook.com"]}
     assert manifest["stored_inputs"] == {
         "whatsapp-token": {
             "kind": "password",
             "label": "WhatsApp access token",
             "description": "Meta access token used by the WhatsApp Cloud API.",
+            "host": "graph.facebook.com",
+            "header": "Authorization",
+            "scheme": "Bearer",
         }
     }
 
@@ -315,8 +318,7 @@ def test_minimal_action_forms_reach_approval(
                 action_id,
                 ActionInvocation(
                     inputs=inputs,
-                    integrations={},
-                    stored_inputs={},
+                    stored_inputs=(),
                     operation_id=OPERATION_ID,
                     responses=(),
                 ),

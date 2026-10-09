@@ -7,9 +7,10 @@ lists, products and catalogs, published Flows, reactions, read receipts, and typ
 an existing Meta media id or a public HTTPS link; the Assistant never fetches a user-supplied URL itself.
 
 Every externally visible effect requires explicit human approval. The Meta access token is collected as the
-`whatsapp-token` Stored Input just in time, sealed by the Team after a successful secret-free Action, and reused
-without another token prompt. Team is the sole persistent custodian: the token does not belong in chat, the repo,
-an environment variable, or Neuron.
+`whatsapp-token` Stored Input just in time, kept by the Team, and reused without another token prompt. The Assistant
+never holds it: every WhatsApp call goes through `ctx.fetch`, and the Team adds the token as an
+`Authorization: Bearer` header on `graph.facebook.com`, as `shimpz.toml` declares. The token does not belong in chat,
+the repo, an environment variable, or Neuron.
 
 Every approval and token prompt is English `shimpz.text` catalog copy that Team shows in the person's interface
 language (ADR-0091); it requires SDK 0.5.2 and CLI 0.5.64 or later. Each approval names the exact sender
@@ -33,6 +34,6 @@ The Action first asks for approval and then, when no Stored Input exists, asks f
 prompt. A successful send returns only the normalized recipient, WhatsApp id, and Meta message id. That id proves
 Meta accepted the request; delivery status requires webhook events and is not claimed by this outbound Assistant.
 
-The client pins Graph API `v23.0`, disables redirects and retries, rejects malformed or oversized responses, and
-admits only `graph.facebook.com` egress. Live validation should perform one approved effect per turn so a later denial
+The client pins Graph API `v23.0`, makes no retry, rejects redirects and malformed or oversized responses, and
+calls only `graph.facebook.com`; Team follows no redirect and refuses any other host. Live validation should perform one approved effect per turn so a later denial
 or expiry cannot make a partially completed matrix look atomic.
