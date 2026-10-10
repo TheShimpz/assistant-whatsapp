@@ -50,3 +50,4 @@ help_url = "https://developers.facebook.com/documentation/business-messaging/wha
 host = "graph.facebook.com"
 header = "Authorization"
 scheme = "Bearer"
+routes = [{ method = "POST", path = "/v23.0/*/messages" }, { method = "PUT", path = "/v23.0/*/messages" }]

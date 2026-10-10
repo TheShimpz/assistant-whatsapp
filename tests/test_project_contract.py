@@ -52,6 +52,10 @@ def test_manifest_declares_one_stored_token_and_fixed_egress() -> None:
             "host": "graph.facebook.com",
             "header": "Authorization",
             "scheme": "Bearer",
+            "routes": [
+                {"method": "POST", "path": "/v23.0/*/messages"},
+                {"method": "PUT", "path": "/v23.0/*/messages"},
+            ],
         }
     }
 
