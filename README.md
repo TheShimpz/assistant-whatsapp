@@ -13,7 +13,7 @@ never holds it: every WhatsApp call goes through `ctx.fetch`, and the Team adds 
 the repo, an environment variable, or Neuron.
 
 Every approval and token prompt is English `shimpz.text` catalog copy that Team shows in the person's interface
-language (ADR-0091); it requires SDK 0.7.1 and CLI 0.8.1 or later. Each approval names the exact sender
+language (ADR-0091); it requires SDK 0.7.2 and CLI 0.8.1 or later. Each approval names the exact sender
 phone-number id and recipient as typed parameters, plus the media type, counts, coordinates, template name and
 language, Flow id or name, or incoming message id when the value fits the catalog identifier alphabet and 128
 characters. A value no parameter can show exactly, such as a reaction emoji, a free-text Flow name, a template name
